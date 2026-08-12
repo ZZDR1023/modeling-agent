@@ -216,6 +216,12 @@ describe("safe package importer", () => {
     await writeFile(join(crcMismatch, "problem.docx"), tampered);
     await expectImportCode(importPackage(crcMismatch), "docx_corrupt");
 
+    const duplicate = await tempPackage("docx-duplicate");
+    await writeFile(join(duplicate, "problem.docx"), docxDocument("body", [
+      { name: "word/document.xml", data: Buffer.from("<not-the-real-document/>") }
+    ]));
+    await expectImportCode(importPackage(duplicate), "docx_corrupt");
+
     const macro = await tempPackage("docx-macro");
     const document = docxDocument(
       "body",

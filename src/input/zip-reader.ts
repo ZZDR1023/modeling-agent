@@ -9,6 +9,7 @@ export interface ZipLimits {
 
 export interface ZipContents {
   entries: Map<string, Buffer>;
+  entryNames: Set<string>;
   entryCount: number;
   uncompressedBytes: number;
 }
@@ -105,6 +106,7 @@ export async function readBoundedZip(
 
   return new Promise((resolve, reject) => {
     const entries = new Map<string, Buffer>();
+    const entryNames = new Set<string>();
     let count = 0;
     let total = 0;
     let settled = false;
@@ -135,6 +137,10 @@ export async function readBoundedZip(
         if (unsafeEntryName(entry.fileName)) {
           throw new PackageImportError(codes.zipSlip, `Unsafe ZIP entry path: ${entry.fileName}`, { path: entry.fileName });
         }
+        if (entryNames.has(entry.fileName)) {
+          throw new PackageImportError(codes.corrupt, `ZIP package contains a duplicate entry: ${entry.fileName}`, { path: entry.fileName });
+        }
+        entryNames.add(entry.fileName);
         if (entry.isEncrypted()) {
           throw new PackageImportError(codes.encrypted, `Encrypted ZIP entry is not allowed: ${entry.fileName}`, { path: entry.fileName });
         }
@@ -157,7 +163,7 @@ export async function readBoundedZip(
       if (settled) return;
       settled = true;
       archive.close();
-      resolve({ entries, entryCount: count, uncompressedBytes: total });
+      resolve({ entries, entryNames, entryCount: count, uncompressedBytes: total });
     });
     archive.readEntry();
   });

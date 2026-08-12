@@ -141,7 +141,7 @@ export async function extractDocx(
     }
     validateContentTypes(contentTypes, path);
     validatePackageRelationships(packageRelationships, path);
-    if (archive.entries.has("word/vbaProject.bin")) {
+    if (archive.entryNames.has("word/vbaProject.bin")) {
       throw new PackageImportError("docx_macro_enabled", "Macro-enabled Word packages are not allowed.", { path });
     }
     for (const [name, xml] of archive.entries) {
