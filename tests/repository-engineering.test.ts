@@ -60,13 +60,13 @@ describe("repository engineering contract", () => {
     expect(job.permissions).toBeUndefined();
 
     const steps = job.steps ?? [];
-    expect(stepUsing(steps, "actions/checkout").uses).toBe("actions/checkout@v4");
+    expect(stepUsing(steps, "actions/checkout").uses).toBe("actions/checkout@v7");
     expect(stepUsing(steps, "actions/setup-node")).toMatchObject({
-      uses: "actions/setup-node@v4",
+      uses: "actions/setup-node@v7",
       with: { "node-version": 24, cache: "npm" }
     });
     expect(stepUsing(steps, "actions/setup-python")).toMatchObject({
-      uses: "actions/setup-python@v5",
+      uses: "actions/setup-python@v7",
       with: { "python-version": "3.11" }
     });
 
