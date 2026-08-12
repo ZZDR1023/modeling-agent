@@ -3,6 +3,25 @@ import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
 
 const workflowPath = ".github/workflows/ci.yml";
+const ciBadgeMarkdown = "[![CI](https://github.com/ZZDR1023/modeling-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/ZZDR1023/modeling-agent/actions/workflows/ci.yml)";
+
+function readmeExplanatoryText(source: string): string {
+  let insideFence = false;
+  return source
+    .split("\n")
+    .filter((line) => {
+      if (line.trim().startsWith("```")) {
+        insideFence = !insideFence;
+        return false;
+      }
+      return !insideFence;
+    })
+    .join("\n")
+    .replace(/`[^`\n]+`/g, "")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/https?:\/\/\S+/g, "");
+}
 
 interface WorkflowStep {
   name?: string;
@@ -107,14 +126,49 @@ describe("repository engineering contract", () => {
     expect(scripts).not.toMatch(/docker\s+(?:build|push)|--runtime\s+pi|runs\.sqlite|secrets\./i);
   });
 
-  it("shows the CI badge and carries the complete standard Apache License 2.0 text", async () => {
-    const [readme, license] = await Promise.all([
-      readFile("README.md", "utf8"),
-      readFile("LICENSE", "utf8")
-    ]);
-    const firstSection = readme.split("\n\n", 2).join("\n\n");
-    expect(firstSection).toContain("[![CI](https://github.com/ZZDR1023/modeling-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/ZZDR1023/modeling-agent/actions/workflows/ci.yml)");
+  it("documents the project primarily in Chinese and explains the exact CI badge", async () => {
+    const readme = await readFile("README.md", "utf8");
+    const badgeOffset = readme.indexOf(ciBadgeMarkdown);
+    expect(badgeOffset).toBeGreaterThanOrEqual(0);
 
+    const textAfterBadge = readme.slice(badgeOffset + ciBadgeMarkdown.length);
+    expect(textAfterBadge).toMatch(/^\n\n> \*\*徽章说明：\*\*/);
+    for (const explanation of [
+      "绿色 / `passing` 表示自动测试与构建通过",
+      "红色 / `failing` 表示失败",
+      "点击徽章可查看 GitHub Actions 日志"
+    ]) {
+      expect(textAfterBadge.slice(0, 180)).toContain(explanation);
+    }
+
+    for (const passage of [
+      "## 架构",
+      "## 开发状态",
+      "## 前置条件",
+      "## 完整命令",
+      "## 安全边界",
+      "## 许可证与材料版权",
+      "当前版本并不成熟",
+      "不代表具备获奖级表现",
+      "任务族共 9 类",
+      "本地执行路径是当前 alpha 阶段支持的基线",
+      "每个导出的 `project.zip` 都是独立可复现的软件包"
+    ]) {
+      expect(readme).toContain(passage);
+    }
+
+    const explanatoryText = readmeExplanatoryText(readme);
+    const chineseCharacterCount = explanatoryText.match(/\p{Script=Han}/gu)?.length ?? 0;
+    const latinCharacterCount = explanatoryText.match(/[A-Za-z]/g)?.length ?? 0;
+    expect(chineseCharacterCount, "README should contain substantial Chinese explanatory prose").toBeGreaterThan(500);
+    expect(
+      chineseCharacterCount / (chineseCharacterCount + latinCharacterCount),
+      "Chinese characters should be the clear majority of non-code explanatory language characters"
+    ).toBeGreaterThan(0.6);
+  });
+
+  it("carries the complete standard Apache License 2.0 text", async () => {
+    const license = await readFile("LICENSE", "utf8");
     for (const passage of [
       "Apache License\n                           Version 2.0, January 2004",
       "1. Definitions.",
