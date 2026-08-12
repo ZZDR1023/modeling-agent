@@ -126,19 +126,15 @@ describe("repository engineering contract", () => {
     expect(scripts).not.toMatch(/docker\s+(?:build|push)|--runtime\s+pi|runs\.sqlite|secrets\./i);
   });
 
-  it("documents the project primarily in Chinese and explains the exact CI badge", async () => {
+  it("documents the project primarily in Chinese and links the exact CI badge without a status legend", async () => {
     const readme = await readFile("README.md", "utf8");
-    const badgeOffset = readme.indexOf(ciBadgeMarkdown);
-    expect(badgeOffset).toBeGreaterThanOrEqual(0);
-
-    const textAfterBadge = readme.slice(badgeOffset + ciBadgeMarkdown.length);
-    expect(textAfterBadge).toMatch(/^\n\n> \*\*徽章说明：\*\*/);
-    for (const explanation of [
-      "绿色 / `passing` 表示自动测试与构建通过",
-      "红色 / `failing` 表示失败",
-      "点击徽章可查看 GitHub Actions 日志"
+    expect(readme).toContain(ciBadgeMarkdown);
+    for (const removedLegendText of [
+      "徽章说明",
+      "绿色 / `passing`",
+      "红色 / `failing`"
     ]) {
-      expect(textAfterBadge.slice(0, 180)).toContain(explanation);
+      expect(readme).not.toContain(removedLegendText);
     }
 
     for (const passage of [

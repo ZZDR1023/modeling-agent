@@ -2,8 +2,6 @@
 
 [![CI](https://github.com/ZZDR1023/modeling-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/ZZDR1023/modeling-agent/actions/workflows/ci.yml)
 
-> **徽章说明：**绿色 / `passing` 表示自动测试与构建通过，红色 / `failing` 表示失败；点击徽章可查看 GitHub Actions 日志。徽章展示的是对应工作流最近一次运行的状态，并不保证它始终为绿色。
-
 `modeling-agent` 是一个在本地运行、面向数学建模竞赛的单用户智能体。它会读取题目材料包，把全部要求分解为带类型的任务图，运行真实且可复现的 Python 实验，记录从结论到证据的追踪关系，并导出一个完整、可复现的项目包。
 
 当前目标版本是 `v0.1-alpha`：以明确的证据等级，尽力覆盖常见任务族。当前版本并不成熟；这既不意味着它能可靠解决所有建模问题，也不代表具备获奖级表现。在缺少基准测试证据时，不应作出成熟或获奖级能力声明。
