@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modeling-agent.local/schemas/coverage-report.v1.json",
+  "title": "CoverageReportV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "approved", "covered_requirement_ids", "missing_requirement_ids", "issues"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "approved": { "type": "boolean" },
+    "covered_requirement_ids": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+    "missing_requirement_ids": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "message"],
+        "properties": {
+          "severity": { "enum": ["warning", "error"] },
+          "message": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

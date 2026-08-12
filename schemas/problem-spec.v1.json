@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modeling-agent.local/schemas/problem-spec.v1.json",
+  "title": "ProblemSpecV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "problem_id", "title", "summary", "language", "requirements", "data_assets", "external_data_policy"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "problem_id": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$" },
+    "title": { "type": "string", "minLength": 1, "maxLength": 500 },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 10000 },
+    "language": { "enum": ["zh", "en", "mixed", "unknown"] },
+    "requirements": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "text", "required", "source_excerpt"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^req-[0-9]{3}$" },
+          "kind": { "enum": ["question", "constraint", "deliverable"] },
+          "text": { "type": "string", "minLength": 1, "maxLength": 5000 },
+          "required": { "type": "boolean" },
+          "source_excerpt": { "type": "string", "minLength": 1, "maxLength": 5000 }
+        }
+      }
+    },
+    "data_assets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["artifact_id", "relative_path", "media_type", "size_bytes", "sha256"],
+        "properties": {
+          "artifact_id": { "type": "string", "pattern": "^input-[a-f0-9]{12}$" },
+          "relative_path": { "type": "string", "minLength": 1 },
+          "media_type": { "type": "string", "minLength": 1 },
+          "size_bytes": { "type": "integer", "minimum": 0 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+    "external_data_policy": {
+      "enum": ["forbidden", "required_pending_approval", "approved"]
+    }
+  }
+}

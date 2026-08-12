@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modeling-agent.local/schemas/evidence-graph.v1.json",
+  "title": "EvidenceGraphV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "run_id", "nodes", "edges"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "run_id": { "type": "string" },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind", "label", "source_artifact_id", "value", "created_at"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^evidence-[a-f0-9]{16}$" },
+          "kind": { "enum": ["metric", "figure", "table", "claim", "assumption", "limitation", "citation"] },
+          "label": { "type": "string", "minLength": 1 },
+          "source_artifact_id": { "type": "string", "minLength": 1 },
+          "value": { "type": ["number", "string", "boolean", "null"] },
+          "unit": { "type": "string" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from", "to", "relation"],
+        "properties": {
+          "from": { "type": "string" },
+          "to": { "type": "string" },
+          "relation": { "enum": ["supports", "derived_from", "visualizes", "limits", "depends_on"] }
+        }
+      }
+    }
+  }
+}

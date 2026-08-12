@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modeling-agent.local/schemas/evaluation-contract.v1.json",
+  "title": "EvaluationContractV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "contract_id", "task_id", "task_type", "primary_objective", "metrics", "hard_checks", "selection_rule", "frozen_at"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "contract_id": { "type": "string", "pattern": "^eval-[a-zA-Z0-9._-]+$" },
+    "task_id": { "type": "string", "pattern": "^task-[0-9]{3}$" },
+    "task_type": { "type": "string", "minLength": 1 },
+    "primary_objective": { "type": "string", "minLength": 1 },
+    "metrics": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "direction", "role"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "direction": { "enum": ["minimize", "maximize", "target", "diagnostic"] },
+          "role": { "enum": ["primary", "secondary", "diagnostic"] }
+        }
+      }
+    },
+    "hard_checks": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+    "selection_rule": { "type": "string", "minLength": 1 },
+    "frozen_at": { "type": "string", "format": "date-time" }
+  }
+}
