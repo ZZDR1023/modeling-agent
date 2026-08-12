@@ -19,8 +19,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     suite_id: run.report.suite_id,
     total_runs: run.report.summary.total_runs,
     completed_runs: run.report.summary.completed_runs,
-    json_report: run.paths.json_path,
-    markdown_report: run.paths.markdown_path
+    json_report: "benchmark-report.json",
+    markdown_report: "benchmark-report.md"
   }, null, 2)}\n`);
 }
 

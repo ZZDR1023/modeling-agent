@@ -49,8 +49,8 @@
       "additionalProperties": false,
       "required": ["agent_adapter_id", "one_shot_adapter_id"],
       "properties": {
-        "agent_adapter_id": { "type": "string", "minLength": 1, "maxLength": 200 },
-        "one_shot_adapter_id": { "type": "string", "minLength": 1, "maxLength": 200 }
+        "agent_adapter_id": { "$ref": "#/$defs/opaqueIdentifier" },
+        "one_shot_adapter_id": { "$ref": "#/$defs/opaqueIdentifier" }
       }
     },
     "execution": {
@@ -91,6 +91,12 @@
     }
   },
   "$defs": {
+    "opaqueIdentifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
     "relativePath": {
       "type": "string",
       "minLength": 1,

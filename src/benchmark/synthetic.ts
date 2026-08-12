@@ -1,6 +1,6 @@
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolve } from "node:path";
 import type { TaskType } from "../contracts/types.js";
 import { validateBenchmarkManifest } from "./contracts.js";
 import { aggregateBenchmarkResults, writeBenchmarkReports } from "./report.js";
@@ -17,8 +17,25 @@ import type {
   BenchmarkVariant
 } from "./types.js";
 
-const defaultBenchmarkRoot = fileURLToPath(new URL("../../benchmarks/synthetic/", import.meta.url));
 const caseDirectories = ["summary-statistics", "custom-threshold"] as const;
+
+async function defaultBenchmarkRoot(): Promise<string> {
+  const moduleDirectory = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    resolve(moduleDirectory, "../../benchmarks/synthetic"),
+    resolve(moduleDirectory, "../../../benchmarks/synthetic"),
+    resolve(process.cwd(), "benchmarks/synthetic")
+  ];
+  for (const candidate of candidates) {
+    try {
+      await access(resolve(candidate, caseDirectories[0], "manifest.json"));
+      return candidate;
+    } catch {
+      // Try the next explicit source/dist/project-root candidate.
+    }
+  }
+  throw new Error("synthetic benchmark fixture root is unavailable");
+}
 
 const deterministicClock: BenchmarkClock = {
   async measure<T>(operation: () => Promise<T>): Promise<{ value: T; duration_ms: number }> {
@@ -47,7 +64,7 @@ function deterministicOutput(context: BenchmarkSolveContext, variant: BenchmarkV
     hard_checks: hardChecksFor(context),
     artifacts: custom ? ["experiment.json", "summary.md"] : ["summary.md"],
     evidence: custom ? ["threshold-evidence", "summary-evidence"] : ["summary-evidence"],
-    usage: { token_count: null, cost_usd: null },
+    usage: { token_count: 1, cost_usd: null },
     output_text: `${variant} deterministic synthetic output for ${context.case_id}; ${custom ? "custom experiment included" : "statistical summary included"}.`
   };
 }
@@ -76,7 +93,7 @@ export interface SyntheticBenchmarkRun {
 }
 
 export async function runSyntheticBenchmarks(options: RunSyntheticBenchmarksOptions): Promise<SyntheticBenchmarkRun> {
-  const benchmarkRoot = options.benchmark_root ?? defaultBenchmarkRoot;
+  const benchmarkRoot = options.benchmark_root ?? await defaultBenchmarkRoot();
   const results: BenchmarkResult[] = [];
   for (const directory of caseDirectories) {
     const caseRoot = resolve(benchmarkRoot, directory);

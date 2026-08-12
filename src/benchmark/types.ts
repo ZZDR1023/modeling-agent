@@ -7,6 +7,7 @@ export type BenchmarkState = "measured" | "not_run" | "blocked";
 export type BenchmarkOutcome = "completed" | "incomplete" | "hard_error" | "blocked_policy" | "not_run";
 export type MetricStatus = "measured" | "unavailable" | "not_run" | "blocked";
 export type MetricValue = boolean | number | string;
+export type BenchmarkHumanReviewNote = "no_revision" | "minor_revision" | "major_revision" | "rejected";
 
 export interface BenchmarkLicense {
   name: string;
@@ -113,6 +114,11 @@ export interface BenchmarkIdentity {
   environment: string;
 }
 
+export interface BenchmarkReviewObservation {
+  minutes: number | null;
+  notes: BenchmarkHumanReviewNote | null;
+}
+
 export interface MeasuredMetric<T extends MetricValue> {
   status: "measured";
   value: T;
@@ -148,7 +154,8 @@ export interface BenchmarkMetrics {
   token_count: BenchmarkMetric<number>;
   cost_usd: BenchmarkMetric<number>;
   human_review_minutes: BenchmarkMetric<number>;
-  human_review_notes: BenchmarkMetric<string>;
+  human_review_notes: BenchmarkMetric<BenchmarkHumanReviewNote>;
+  reference_leak_check: BenchmarkMetric<boolean>;
   artifact_count: BenchmarkMetric<number>;
   evidence_count: BenchmarkMetric<number>;
   commit_identity: BenchmarkMetric<string>;
@@ -158,7 +165,6 @@ export interface BenchmarkMetrics {
 export interface BenchmarkHardCheckResult {
   id: string;
   status: "passed" | "failed" | "blocked" | "not_run";
-  note?: string;
 }
 
 export interface BenchmarkPolicyEvent {
@@ -174,6 +180,7 @@ export interface BenchmarkResult {
   adapter_id: string;
   run_id: string;
   frozen_case_sha256: string;
+  evaluation_contract_sha256: string;
   state: BenchmarkState;
   outcome: BenchmarkOutcome;
   observed_task_types: TaskType[];

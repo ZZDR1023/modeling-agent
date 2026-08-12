@@ -58,6 +58,7 @@ const result: BenchmarkResult = {
   adapter_id: "deterministic-agent-v1",
   run_id: "synthetic-contract-agent-aaaaaaaaaaaa",
   frozen_case_sha256: "b".repeat(64),
+  evaluation_contract_sha256: "c".repeat(64),
   state: "measured",
   outcome: "completed",
   observed_task_types: ["statistical_analysis"],
@@ -74,6 +75,7 @@ const result: BenchmarkResult = {
     cost_usd: unavailableMetric("adapter_did_not_report"),
     human_review_minutes: unavailableMetric("not_reviewed"),
     human_review_notes: unavailableMetric("not_reviewed"),
+    reference_leak_check: measuredMetric(true, "harness_leak_check"),
     artifact_count: measuredMetric(2, "adapter_inventory"),
     evidence_count: measuredMetric(3, "adapter_inventory"),
     commit_identity: measuredMetric("a".repeat(40), "git_commit"),
@@ -98,6 +100,10 @@ describe("benchmark contracts", () => {
     const leakingPolicy = structuredClone(manifest);
     leakingPolicy.reference_policy.access = "solve_and_score" as "scoring_only";
     expect(() => validateBenchmarkManifest(leakingPolicy)).toThrow(BenchmarkContractError);
+
+    const unsafeAdapter = structuredClone(manifest);
+    unsafeAdapter.runtime.agent_adapter_id = "../../token=TOP-SECRET";
+    expect(() => validateBenchmarkManifest(unsafeAdapter)).toThrow(BenchmarkContractError);
   });
 
   it("represents unknown token, cost, and human-review values as unavailable nulls rather than zero", () => {
@@ -119,5 +125,9 @@ describe("benchmark contracts", () => {
     const failedCheck = structuredClone(result);
     failedCheck.hard_checks[0]!.status = "failed";
     expect(() => validateBenchmarkResult(failedCheck)).toThrow(/completed result/i);
+
+    const completedWithError = structuredClone(result);
+    completedWithError.error = { class: "AdapterError", message: `failure:${"a".repeat(12)}`, fingerprint: "a".repeat(64) };
+    expect(() => validateBenchmarkResult(completedWithError)).toThrow(/completed result/i);
   });
 });

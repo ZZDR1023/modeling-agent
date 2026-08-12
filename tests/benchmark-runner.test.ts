@@ -43,7 +43,7 @@ async function createCase(): Promise<{ caseRoot: string; manifest: BenchmarkMani
     },
     runtime: { agent_adapter_id: "agent-test-v1", one_shot_adapter_id: "one-shot-test-v1" },
     execution: { kind: "local", network_access: "disabled" },
-    budget: { max_wall_time_ms: 1_000, max_tokens: 1_000, max_cost_usd: null, max_human_review_minutes: null },
+    budget: { max_wall_time_ms: 1_000, max_tokens: null, max_cost_usd: null, max_human_review_minutes: null },
     allowed_task_types: ["statistical_analysis", "custom_experiment"],
     expected_task_types: ["statistical_analysis"],
     hard_checks: [{ id: "answer-present", description: "An answer is produced." }]

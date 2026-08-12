@@ -21,6 +21,7 @@ const metricNames: Array<keyof BenchmarkMetrics> = [
   "cost_usd",
   "human_review_minutes",
   "human_review_notes",
+  "reference_leak_check",
   "artifact_count",
   "evidence_count",
   "commit_identity",
@@ -54,10 +55,16 @@ function assertComparableVariants(results: readonly BenchmarkResult[]): void {
     if (agent && oneShot && agent.frozen_case_sha256 !== oneShot.frozen_case_sha256) {
       throw new Error(`benchmark variants for ${caseId} do not share a frozen case`);
     }
+    if (agent && oneShot && agent.evaluation_contract_sha256 !== oneShot.evaluation_contract_sha256) {
+      throw new Error(`benchmark variants for ${caseId} do not share an evaluation contract`);
+    }
   }
 }
 
 export function aggregateBenchmarkResults(input: readonly BenchmarkResult[], suiteId = "synthetic-v1"): BenchmarkAggregateReport {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(suiteId)) {
+    throw new Error("benchmark suite id must be a bounded opaque identifier");
+  }
   const results = input.map((entry) => validateBenchmarkResult(structuredClone(entry))).sort(stableResultOrder);
   assertComparableVariants(results);
   const metrics = Object.fromEntries(metricNames.map((name) => [name, aggregateMetric(results.map((result) => result.metrics[name]))])) as Record<keyof BenchmarkMetrics, BenchmarkMetricAggregate>;

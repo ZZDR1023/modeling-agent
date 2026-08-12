@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import type { ErrorObject, ValidateFunction } from "ajv";
@@ -32,10 +33,24 @@ export class BenchmarkContractError extends Error {
   }
 }
 
+function locateSchemaDirectory(): string {
+  const moduleDirectory = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    resolve(moduleDirectory, "../../schemas"),
+    resolve(moduleDirectory, "../../../schemas"),
+    resolve(process.cwd(), "schemas")
+  ];
+  const directory = candidates.find((candidate) => Object.values(schemaFiles).every((filename) => existsSync(resolve(candidate, filename))));
+  if (directory === undefined) {
+    throw new BenchmarkContractError("benchmark-manifest", "schema directory is unavailable");
+  }
+  return directory;
+}
+
 class BenchmarkSchemaRegistry {
   readonly #validators = new Map<BenchmarkContractName, ValidateFunction>();
 
-  constructor(schemaDirectory = fileURLToPath(new URL("../../schemas/", import.meta.url))) {
+  constructor(schemaDirectory = locateSchemaDirectory()) {
     const ajv = new Ajv2020({ allErrors: true, strict: true, allowUnionTypes: true });
     ajv.addFormat("uri", {
       type: "string",
@@ -49,7 +64,7 @@ class BenchmarkSchemaRegistry {
       }
     });
     for (const [name, filename] of Object.entries(schemaFiles) as Array<[BenchmarkContractName, string]>) {
-      const schema = JSON.parse(readFileSync(new URL(filename, `file://${schemaDirectory}/`), "utf8")) as object;
+      const schema = JSON.parse(readFileSync(resolve(schemaDirectory, filename), "utf8")) as object;
       this.#validators.set(name, ajv.compile(schema));
     }
   }
@@ -105,8 +120,8 @@ function validateResultSemantics(result: BenchmarkResult): void {
     throw new BenchmarkContractError("benchmark-result", "hard check ids must be unique");
   }
   if (result.outcome === "completed") {
-    if (result.state !== "measured" || !measuredBoolean(result.metrics.completion, true) || !measuredBoolean(result.metrics.hard_error, false) || result.hard_checks.some((check) => check.status !== "passed")) {
-      throw new BenchmarkContractError("benchmark-result", "completed result contradicts completion, hard-error, state, or hard-check evidence");
+    if (result.state !== "measured" || result.error !== null || !measuredBoolean(result.metrics.completion, true) || !measuredBoolean(result.metrics.hard_error, false) || result.hard_checks.some((check) => check.status !== "passed")) {
+      throw new BenchmarkContractError("benchmark-result", "completed result contradicts completion, error, hard-error, state, or hard-check evidence");
     }
   } else if (result.metrics.completion.status === "measured" && result.metrics.completion.value === true) {
     throw new BenchmarkContractError("benchmark-result", "non-completed result cannot report completion=true");
