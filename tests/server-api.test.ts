@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -405,9 +405,73 @@ describe("Fastify server baseline", () => {
     expect(ready.statusCode).toBe(200);
     expect(ready.headers["content-type"]).toMatch(/^application\/zip/);
     expect(ready.headers["content-disposition"]).toBe("attachment; filename=\"project.zip\"");
+    expect(ready.headers["content-length"]).toBe(String(bytes.length));
     expect(ready.rawPayload).toEqual(bytes);
 
     await rm(root, { recursive: true, force: true });
+  });
+
+  it("rejects a final archive symlink without returning bytes from outside the workspace", async () => {
+    const root = await mkdtemp(join(tmpdir(), "modeling-server-archive-symlink-"));
+    try {
+      const workspace = resolve(root, "workspace");
+      const outsideArchive = resolve(root, "outside.zip");
+      const archive = resolve(workspace, "project.zip");
+      const outsideBytes = Buffer.from("PK\u0003\u0004OUTSIDE-HOST-SECRET", "binary");
+      await mkdir(workspace);
+      await writeFile(outsideArchive, outsideBytes);
+      await symlink(outsideArchive, archive);
+      const instance = server(adapter({
+        showRun: (id) => id === "run-symlink"
+          ? { run: summary({ id, workspace_path: workspace, project_archive: archive }), events: [] }
+          : undefined
+      }));
+
+      const response = await instance.inject({ method: "GET", url: "/api/runs/run-symlink/archive" });
+
+      expect(response.statusCode).toBe(410);
+      expect(response.json()).toEqual({
+        status: "failed",
+        error: { class: "archive_gone", message: "The project archive is no longer available." }
+      });
+      expect(response.rawPayload).not.toEqual(outsideBytes);
+      expect(response.body).not.toContain("OUTSIDE-HOST-SECRET");
+      expect((await lstat(archive)).isSymbolicLink()).toBe(true);
+      expect(await readlink(archive)).toBe(outsideArchive);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an archive reached through an intermediate symlink outside the workspace", async () => {
+    const root = await mkdtemp(join(tmpdir(), "modeling-server-archive-chain-"));
+    try {
+      const workspace = resolve(root, "workspace");
+      const outsideDirectory = resolve(root, "outside");
+      const outsideArchive = resolve(outsideDirectory, "project.zip");
+      const archive = resolve(workspace, "link", "project.zip");
+      const outsideBytes = Buffer.from("PK\u0003\u0004OUTSIDE-DIRECTORY-SECRET", "binary");
+      await Promise.all([mkdir(workspace), mkdir(outsideDirectory)]);
+      await writeFile(outsideArchive, outsideBytes);
+      await symlink(outsideDirectory, resolve(workspace, "link"));
+      const instance = server(adapter({
+        showRun: (id) => id === "run-directory-symlink"
+          ? { run: summary({ id, workspace_path: workspace, project_archive: archive }), events: [] }
+          : undefined
+      }));
+
+      const response = await instance.inject({ method: "GET", url: "/api/runs/run-directory-symlink/archive" });
+
+      expect(response.statusCode).toBe(410);
+      expect(response.json()).toEqual({
+        status: "failed",
+        error: { class: "archive_gone", message: "The project archive is no longer available." }
+      });
+      expect(response.rawPayload).not.toEqual(outsideBytes);
+      expect(response.body).not.toContain("OUTSIDE-DIRECTORY-SECRET");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("converts unexpected request-time adapter failures to a non-sensitive 500 envelope", async () => {

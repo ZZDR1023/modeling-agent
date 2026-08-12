@@ -1,7 +1,7 @@
-import { createReadStream } from "node:fs";
+import { constants as fsConstants } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { open, stat } from "node:fs/promises";
-import { basename, isAbsolute, relative, resolve, sep } from "node:path";
+import { open, realpath, type FileHandle } from "node:fs/promises";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import Fastify, {
   type FastifyInstance,
   type FastifyReply,
@@ -187,8 +187,27 @@ function runOptions(body: CreateRunBody): RunOptions {
   };
 }
 
-function isMissingFile(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === "ENOENT";
+const ARCHIVE_GONE_MESSAGE = "The project archive is no longer available.";
+const ARCHIVE_UNAVAILABLE_CODES = new Set(["EACCES", "ELOOP", "ENOENT", "ENOTDIR", "EPERM"]);
+
+function errorCode(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null || !("code" in error)) return undefined;
+  return typeof error.code === "string" ? error.code : undefined;
+}
+
+function isArchiveUnavailable(error: unknown): boolean {
+  const code = errorCode(error);
+  return code !== undefined && ARCHIVE_UNAVAILABLE_CODES.has(code);
+}
+
+function isWithin(root: string, candidate: string): boolean {
+  const candidateRelative = relative(root, candidate);
+  return candidateRelative === ""
+    || (!isAbsolute(candidateRelative) && candidateRelative !== ".." && !candidateRelative.startsWith(`..${sep}`));
+}
+
+function archiveGone(): HttpError {
+  return new HttpError(410, "archive_gone", ARCHIVE_GONE_MESSAGE);
 }
 
 function statusCode(error: unknown): number | undefined {
@@ -196,17 +215,72 @@ function statusCode(error: unknown): number | undefined {
   return typeof error.statusCode === "number" ? error.statusCode : undefined;
 }
 
-async function hasZipSignature(path: string): Promise<boolean> {
-  const handle = await open(path, "r");
+function hasZipSignature(signature: Buffer, bytesRead: number): boolean {
+  if (bytesRead < 4 || signature[0] !== 0x50 || signature[1] !== 0x4b) return false;
+  return (signature[2] === 0x03 && signature[3] === 0x04)
+    || (signature[2] === 0x05 && signature[3] === 0x06)
+    || (signature[2] === 0x07 && signature[3] === 0x08);
+}
+
+interface OpenArchive {
+  handle: FileHandle;
+  size: number;
+}
+
+async function openArchive(workspacePath: string, archivePath: string): Promise<OpenArchive> {
+  const workspaceRoot = resolve(workspacePath);
+  const candidatePath = resolve(archivePath);
+  if (!isWithin(workspaceRoot, candidatePath) || candidatePath === workspaceRoot) throw archiveGone();
+
+  let canonicalWorkspace: string;
   try {
+    canonicalWorkspace = await realpath(workspaceRoot);
+  } catch (error) {
+    if (isArchiveUnavailable(error)) throw archiveGone();
+    throw error;
+  }
+
+  let workspaceHandle: FileHandle | undefined;
+  let archiveHandle: FileHandle | undefined;
+  try {
+    workspaceHandle = await open(
+      workspaceRoot,
+      fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW
+    );
+    const openedWorkspace = await realpath(`/proc/self/fd/${workspaceHandle.fd}`);
+    const workspaceStat = await workspaceHandle.stat({ bigint: true });
+    if (openedWorkspace !== canonicalWorkspace || !workspaceStat.isDirectory()) throw archiveGone();
+
+    const archiveRelative = relative(workspaceRoot, candidatePath);
+    archiveHandle = await open(
+      `/proc/self/fd/${workspaceHandle.fd}/${archiveRelative}`,
+      fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK
+    );
+    const canonicalArchive = await realpath(`/proc/self/fd/${archiveHandle.fd}`);
+    if (!isWithin(canonicalWorkspace, canonicalArchive) || canonicalArchive === canonicalWorkspace) {
+      throw archiveGone();
+    }
+
+    const archiveStat = await archiveHandle.stat();
+    const stableWorkspaceStat = await workspaceHandle.stat({ bigint: true });
+    if (workspaceStat.dev !== stableWorkspaceStat.dev || workspaceStat.ino !== stableWorkspaceStat.ino) {
+      throw archiveGone();
+    }
+    if (!archiveStat.isFile()) throw archiveGone();
     const signature = Buffer.alloc(4);
-    const { bytesRead } = await handle.read(signature, 0, signature.length, 0);
-    if (bytesRead < 4 || signature[0] !== 0x50 || signature[1] !== 0x4b) return false;
-    return (signature[2] === 0x03 && signature[3] === 0x04)
-      || (signature[2] === 0x05 && signature[3] === 0x06)
-      || (signature[2] === 0x07 && signature[3] === 0x08);
+    const { bytesRead } = await archiveHandle.read(signature, 0, signature.length, 0);
+    if (!hasZipSignature(signature, bytesRead)) throw archiveGone();
+
+    const result = { handle: archiveHandle, size: archiveStat.size };
+    archiveHandle = undefined;
+    return result;
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    if (isArchiveUnavailable(error)) throw archiveGone();
+    throw error;
   } finally {
-    await handle.close();
+    await archiveHandle?.close().catch(() => undefined);
+    await workspaceHandle?.close().catch(() => undefined);
   }
 }
 
@@ -309,28 +383,14 @@ export function buildServer(options: BuildServerOptions): FastifyInstance {
     if (!COMPLETED_STATUSES.has(details.run.status) || archive === null) {
       throw new HttpError(409, "archive_not_ready", "The run does not have a completed project archive.");
     }
-    const workspaceRoot = resolve(details.run.workspace_path);
-    const archivePath = resolve(archive);
-    const archiveRelative = relative(workspaceRoot, archivePath);
-    if (isAbsolute(archiveRelative) || archiveRelative === ".." || archiveRelative.startsWith(`..${sep}`)) {
-      throw new HttpError(410, "archive_gone", "The project archive is no longer available.");
-    }
-    let archiveStat;
-    try {
-      archiveStat = await stat(archivePath);
-    } catch (error) {
-      if (isMissingFile(error)) throw new HttpError(410, "archive_gone", "The project archive is no longer available.");
-      throw error;
-    }
-    if (!archiveStat.isFile() || !(await hasZipSignature(archivePath))) {
-      throw new HttpError(410, "archive_gone", "The project archive is no longer available.");
-    }
+    const openedArchive = await openArchive(details.run.workspace_path, archive);
+    const archiveStream = openedArchive.handle.createReadStream({ autoClose: true, start: 0 });
     const filename = "project.zip";
     return reply
       .type("application/zip")
       .header("Content-Disposition", `attachment; filename="${filename}"`)
-      .header("Content-Length", String(archiveStat.size))
-      .send(createReadStream(archivePath));
+      .header("Content-Length", String(openedArchive.size))
+      .send(archiveStream);
   });
 
   server.addHook("onClose", async () => {
