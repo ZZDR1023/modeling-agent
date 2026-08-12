@@ -133,10 +133,15 @@ A successful run prints a JSON object with \`"status": "success"\`, reports all 
 
 Use the extracted project root as the build context. Building needs network access to download the base image and locked Python packages unless both are already cached; running the completed image does not require network access.
 
+On Linux, create the host output directory and run the container with your numeric user and group IDs:
+
 \`\`\`sh
 docker build -f reproducibility/environment/Dockerfile -t modeling-project-reproducer .
-docker run --rm modeling-project-reproducer
+mkdir -p reproduced
+docker run --rm --user "\$(id -u):\$(id -g)" --mount type=bind,src="\$(pwd)/reproduced",dst=/opt/modeling-project/reproduced modeling-project-reproducer
 \`\`\`
+
+The bind mount keeps reproduced outputs on the host after the ephemeral container exits. The command uses Linux \`id\` and POSIX shell substitution; on Docker Desktop for macOS or Windows, create an equivalent host directory, use a path accepted by that shell, and omit or adapt \`--user\` if numeric Linux IDs are unavailable.
 
 ## Offline use and known limitations
 

@@ -108,6 +108,11 @@ describe("ReportBuilder evidence channel", () => {
     expect(projectReadme).toContain("pip install -r reproducibility/environment/requirements.lock");
     expect(projectReadme.match(/python3 reproduce\.py/g)).toHaveLength(1);
     expect(projectReadme).toContain("docker build -f reproducibility/environment/Dockerfile -t modeling-project-reproducer .");
+    expect(projectReadme).toContain("mkdir -p reproduced");
+    expect(projectReadme).toContain("--user \"$(id -u):$(id -g)\"");
+    expect(projectReadme).toContain("--mount type=bind,src=\"$(pwd)/reproduced\",dst=/opt/modeling-project/reproduced");
+    expect(projectReadme).toContain("The bind mount keeps reproduced outputs on the host after the ephemeral container exits.");
+    expect(projectReadme).toContain("Linux");
     expect(projectReadme).not.toContain("run-report");
     expect(projectReadme).not.toContain(root);
   });

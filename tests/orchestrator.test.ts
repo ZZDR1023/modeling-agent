@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { access, appendFile, cp, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { access, appendFile, cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
 import { basename, dirname, isAbsolute, join, posix, resolve } from "node:path";
@@ -24,13 +24,40 @@ function runCommand(command: string, args: string[], cwd: string, env: NodeJS.Pr
   });
 }
 
-function dockerCopySources(dockerfile: string): string[] {
-  const sources: string[] = [];
+interface DockerCopyRule {
+  source: string;
+  destination: string;
+}
+
+function dockerCopyRules(dockerfile: string): DockerCopyRule[] {
+  const rules: DockerCopyRule[] = [];
   for (const line of dockerfile.split("\n")) {
-    const match = /^COPY\s+(\S+)\s+\S+\s*$/.exec(line.trim());
-    if (match?.[1]) sources.push(match[1]);
+    const match = /^COPY\s+(\S+)\s+(\S+)\s*$/.exec(line.trim());
+    if (match?.[1] && match[2]) rules.push({ source: match[1], destination: match[2] });
   }
-  return sources;
+  return rules;
+}
+
+function dockerCopyCovers(path: string, rule: DockerCopyRule): boolean {
+  const source = posix.normalize(rule.source.replace(/^\.\//, ""));
+  return source === "." || path === source || path.startsWith(`${source}/`);
+}
+
+function dockerImageManifestCoverage(manifestPaths: string[], dockerfile: string): { covered: number; total: number; missing: string[] } {
+  const rules = dockerCopyRules(dockerfile);
+  const missing = manifestPaths.filter((path) => !rules.some((rule) => dockerCopyCovers(path, rule)));
+  return { covered: manifestPaths.length - missing.length, total: manifestPaths.length, missing };
+}
+
+function dockerRunCommand(readme: string): string {
+  const block = /## Docker reproduction[\s\S]*?```sh\n([\s\S]*?)```/.exec(readme)?.[1] ?? "";
+  return block.split("\n").find((line) => line.startsWith("docker run ")) ?? "";
+}
+
+function dockerRunOutputMount(command: string): { source: string; destination: string } | undefined {
+  const match = /--mount\s+type=bind,src=(?:"([^"]+)"|(\S+)),dst=(\S+)/.exec(command);
+  const source = match?.[1] ?? match?.[2];
+  return source && match?.[3] ? { source, destination: match[3] } : undefined;
 }
 
 describe("fake local vertical slice", () => {
@@ -94,7 +121,19 @@ describe("fake local vertical slice", () => {
     expect(projectReadme).toContain("pip install -r reproducibility/environment/requirements.lock");
     expect(projectReadme.match(/python3 reproduce\.py/g)).toHaveLength(1);
     expect(projectReadme).toContain("docker build -f reproducibility/environment/Dockerfile -t modeling-project-reproducer .");
-    expect(projectReadme).toContain("docker run --rm modeling-project-reproducer");
+    const dockerRun = dockerRunCommand(projectReadme);
+    expect(dockerRun).toContain("--user \"$(id -u):$(id -g)\"");
+    const outputMount = dockerRunOutputMount(dockerRun);
+    expect(outputMount).toEqual({ source: "$(pwd)/reproduced", destination: "/opt/modeling-project/reproduced" });
+    const simulatedHostRoot = await mkdtemp(join(tmpdir(), "modeling-docker-output-"));
+    const simulatedHostOutput = outputMount?.source.replace("$(pwd)", simulatedHostRoot);
+    expect(simulatedHostOutput).toBe(resolve(simulatedHostRoot, "reproduced"));
+    await mkdir(simulatedHostOutput!, { recursive: true });
+    await writeFile(resolve(simulatedHostOutput!, "reproduction-result.json"), "{}\n", "utf8");
+    await access(resolve(simulatedHostRoot, "reproduced", "reproduction-result.json"));
+    expect(dockerRun).toMatch(/modeling-project-reproducer$/);
+    expect(projectReadme).toContain("mkdir -p reproduced");
+    expect(projectReadme).toContain("Linux");
     expect(projectReadme).toContain("offline");
     expect(projectReadme).not.toContain(basename(result.workspacePath));
     expect(projectReadme).not.toContain(process.cwd());
@@ -102,20 +141,20 @@ describe("fake local vertical slice", () => {
     const dockerfile = await readFile(resolve(projectRoot, "reproducibility/environment/Dockerfile"), "utf8");
     expect(dockerfile).toContain("# Build context: exported project root");
     expect(dockerfile).toContain('CMD ["python", "reproduce.py"]');
-    const copySources = dockerCopySources(dockerfile);
-    expect(copySources).toEqual(expect.arrayContaining([
-      "reproducibility/environment/requirements.lock",
-      "reproducibility/python/modeling_agent",
-      "reproduce.py",
-      "deliverables",
-      "reproducibility/inputs",
-      "reproducibility/experiments"
-    ]));
+    const copyRules = dockerCopyRules(dockerfile);
+    const copySources = copyRules.map((rule) => rule.source);
+    expect(copySources).toEqual(expect.arrayContaining(["reproducibility/environment/requirements.lock", "."]));
     for (const source of copySources) {
       expect(isAbsolute(source), source).toBe(false);
       expect(posix.normalize(source), source).not.toMatch(/^\.\.\//);
       await access(resolve(projectRoot, source));
     }
+    const packageManifest = JSON.parse(await readFile(resolve(projectRoot, "reproducibility/package-manifest.json"), "utf8")) as { files: Array<{ path: string }> };
+    const manifestPaths = packageManifest.files.map((record) => record.path);
+    const coverage = dockerImageManifestCoverage(manifestPaths, dockerfile);
+    expect(coverage.total).toBeGreaterThan(0);
+    expect(coverage).toMatchObject({ covered: coverage.total, missing: [] });
+    expect(copyRules.some((rule) => rule.source === "." && rule.destination === ".")).toBe(true);
     expect(archiveEntries.some((path) => path.endsWith(".aux"))).toBe(false);
     for (const path of archiveEntries.filter((entry) => /(?:\.(?:json|md|tex|log|py|txt|lock|csv)|Dockerfile)$/.test(entry))) {
       const content = (await runCommand("unzip", ["-p", result.projectArchive, path], process.cwd())).stdout;
