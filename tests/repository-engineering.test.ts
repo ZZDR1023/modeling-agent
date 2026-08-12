@@ -17,9 +17,14 @@ interface WorkflowJob {
   steps?: WorkflowStep[];
 }
 
+interface WorkflowTriggers {
+  push?: { branches?: string[] };
+  pull_request?: unknown;
+}
+
 interface Workflow {
   name?: string;
-  on?: unknown;
+  on?: WorkflowTriggers;
   permissions?: Record<string, unknown>;
   jobs?: Record<string, WorkflowJob>;
 }
@@ -44,6 +49,10 @@ describe("repository engineering contract", () => {
     const workflow = parse(source) as Workflow;
     const jobs = Object.values(workflow.jobs ?? {});
     expect(jobs).toHaveLength(1);
+    expect(workflow.on).toEqual({
+      push: { branches: ["main"] },
+      pull_request: null
+    });
 
     const job = jobs[0]!;
     expect(job["runs-on"]).toBe("ubuntu-latest");
@@ -86,7 +95,13 @@ describe("repository engineering contract", () => {
     expect(scripts).toMatch(/status[^\n]*success/);
     expect(scripts).toMatch(/verified_task_count[^\n]*9/);
     expect(scripts).toMatch(/artifact[^\n]*40/i);
+    expect(scripts).toContain('renderer = result.get("report_renderer")');
+    expect(scripts).toContain('if renderer == "xelatex":');
+    expect(scripts).toContain('elif renderer == "builtin":');
     expect(scripts).toMatch(/warning[^\n]*(?:None|null)/);
+    expect(scripts).toContain('assert "xelatex" in normalized_warning, result');
+    expect(scripts).toContain('assert "unavailable" in normalized_warning or "fail" in normalized_warning, result');
+    expect(scripts).toContain('assert "bundled" in normalized_warning and "fallback" in normalized_warning, result');
     expect(scripts).toMatch(/reproduced[^\n]*report_pdf/);
     expect(scripts).not.toMatch(/run-[0-9]{8,}/);
     expect(scripts).not.toMatch(/docker\s+(?:build|push)|--runtime\s+pi|runs\.sqlite|secrets\./i);

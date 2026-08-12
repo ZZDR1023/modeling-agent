@@ -223,9 +223,18 @@ describe("fake local vertical slice", () => {
       verified_task_count: number;
       tasks: Array<{ verified_artifact_count: number }>;
       report_pdf: string;
+      report_renderer: "xelatex" | "builtin";
       warning: string | null;
     };
-    expect(manifest).toMatchObject({ status: "success", task_count: 9, verified_task_count: 9, report_pdf: "deliverables/report.pdf", warning: null });
+    expect(manifest).toMatchObject({ status: "success", task_count: 9, verified_task_count: 9, report_pdf: "deliverables/report.pdf" });
+    if (manifest.report_renderer === "xelatex") {
+      expect(manifest.warning).toBeNull();
+    } else {
+      expect(manifest.report_renderer).toBe("builtin");
+      expect(manifest.warning).toMatch(/xelatex/i);
+      expect(manifest.warning).toMatch(/(?:unavailable|fail)/i);
+      expect(manifest.warning).toMatch(/bundled.*fallback/i);
+    }
     expect(manifest.tasks.reduce((total, task) => total + task.verified_artifact_count, 0)).toBe(40);
     expect((await readFile(resolve(unpacked, "reproduced", "deliverables", "report.pdf"))).subarray(0, 5).toString()).toBe("%PDF-");
     expect((await readdir(resolve(unpacked, "reproduced", "experiments"))).sort()).toHaveLength(9);

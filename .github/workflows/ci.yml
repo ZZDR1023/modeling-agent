@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 permissions:
@@ -66,7 +67,18 @@ jobs:
           assert result.get("status") == "success", result
           assert result.get("verified_task_count") == 9, result
           assert artifact_count == 40, {"artifact_count": artifact_count, "result": result}
-          assert result.get("warning") is None, result
+          renderer = result.get("report_renderer")
+          warning = result.get("warning")
+          if renderer == "xelatex":
+              assert warning is None, result
+          elif renderer == "builtin":
+              assert isinstance(warning, str) and warning, result
+              normalized_warning = warning.lower()
+              assert "xelatex" in normalized_warning, result
+              assert "unavailable" in normalized_warning or "fail" in normalized_warning, result
+              assert "bundled" in normalized_warning and "fallback" in normalized_warning, result
+          else:
+              raise AssertionError(result)
           pdf = Path("reproduced") / result["report_pdf"]
           assert pdf.read_bytes().startswith(b"%PDF-"), pdf
           PY
