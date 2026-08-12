@@ -95,7 +95,8 @@ describe("ReportBuilder evidence channel", () => {
       committedExperimentsRoot: committed,
       pythonSourceRoot: pythonSource,
       pythonRequirementsPath: resolve(root, "requirements.lock"),
-      pythonDockerfilePath: resolve(root, "Dockerfile")
+      pythonDockerfilePath: resolve(root, "Dockerfile"),
+      pythonVersion: "3.10.12"
     });
     const markdown = await readFile(report.reportMarkdown, "utf8");
     expect(markdown).toContain("score: 222 (`evidence-2222222222222222`)");
@@ -104,7 +105,11 @@ describe("ReportBuilder evidence channel", () => {
     expect(markdown).toContain("evidence-4444444444444444");
 
     const projectReadme = await readFile(resolve(report.projectRoot, "README.md"), "utf8");
-    expect(projectReadme).toContain("Python 3.11");
+    expect(projectReadme).toContain("The frozen experiment records were originally produced and verified with Python 3.10.12.");
+    expect(projectReadme).toContain("a Python environment compatible with the packaged `requirements.lock`");
+    expect(projectReadme).toContain("the packaged Dockerfile's fixed environment");
+    expect(projectReadme).not.toContain("Python 3.10.12 is required");
+    expect(projectReadme).not.toContain("compatible Python 3.11 environment");
     expect(projectReadme).toContain("pip install -r reproducibility/environment/requirements.lock");
     expect(projectReadme.match(/python3 reproduce\.py/g)).toHaveLength(1);
     expect(projectReadme).toContain("docker build -f reproducibility/environment/Dockerfile -t modeling-project-reproducer .");

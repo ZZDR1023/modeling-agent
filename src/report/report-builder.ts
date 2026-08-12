@@ -113,7 +113,7 @@ This archive is a standalone snapshot of a completed modeling project. It contai
 
 ## Local reproduction
 
-Python ${pythonVersion} is required. From the extracted project root, create an isolated environment and install the locked dependencies (this installation requires access to a compatible Python package index unless the wheels are already cached):
+The frozen experiment records were originally produced and verified with Python ${pythonVersion}. For local reproduction, use a Python environment compatible with the packaged \`requirements.lock\`; the recorded version documents this package's verified local environment rather than imposing an exact-version requirement on every reproduction. From the extracted project root, create an isolated environment and install the locked dependencies (this installation requires access to a compatible Python package index unless the wheels are already cached):
 
 \`\`\`sh
 python3 -m venv .venv
@@ -131,7 +131,7 @@ A successful run prints a JSON object with \`"status": "success"\`, reports all 
 
 ## Docker reproduction
 
-Use the extracted project root as the build context. Building needs network access to download the base image and locked Python packages unless both are already cached; running the completed image does not require network access.
+Docker reproduction uses the packaged Dockerfile's fixed environment rather than the locally recorded Python version. Use the extracted project root as the build context. Building needs network access to download the base image and locked Python packages unless both are already cached; running the completed image does not require network access.
 
 On Linux, create the host output directory and run the container with your numeric user and group IDs:
 
@@ -145,7 +145,7 @@ The bind mount keeps reproduced outputs on the host after the ephemeral containe
 
 ## Offline use and known limitations
 
-Reproduction itself uses only packaged files and makes no network requests. A fully offline first-time setup requires a compatible Python 3.11 environment with every locked dependency already installed or cached, or a prebuilt Docker image; the archive does not include dependency wheels or the Docker base image. Results can also vary or fail on unsupported Python versions, platforms without compatible binary packages, insufficient memory, or modified package files. XeLaTeX is optional: if it is absent or cannot compile the report, the bundled fallback renderer still creates a valid PDF and records a warning.
+Reproduction itself uses only packaged files and makes no network requests. A fully offline first-time setup requires a compatible Python environment with the packaged dependencies already installed or cached, or a prebuilt Docker image; the archive does not include dependency wheels or the Docker base image. Results can also vary or fail when the locked dependencies cannot be installed in the selected Python environment, on platforms without compatible binary packages, with insufficient memory, or after package files are modified. XeLaTeX is optional: if it is absent or cannot compile the report, the bundled fallback renderer still creates a valid PDF and records a warning.
 `;
 }
 

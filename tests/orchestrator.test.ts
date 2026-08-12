@@ -116,7 +116,11 @@ describe("fake local vertical slice", () => {
       "reproducibility/python/modeling_agent/runner.py"
     ]));
     const projectReadme = await readFile(resolve(projectRoot, "README.md"), "utf8");
-    expect(projectReadme).toContain("Python 3.11");
+    expect(projectReadme).toContain("The frozen experiment records were originally produced and verified with Python 3.10.12.");
+    expect(projectReadme).toContain("a Python environment compatible with the packaged `requirements.lock`");
+    expect(projectReadme).toContain("the packaged Dockerfile's fixed environment");
+    expect(projectReadme).not.toContain("Python 3.10.12 is required");
+    expect(projectReadme).not.toContain("compatible Python 3.11 environment");
     expect(projectReadme).toContain("python3 -m venv .venv");
     expect(projectReadme).toContain("pip install -r reproducibility/environment/requirements.lock");
     expect(projectReadme.match(/python3 reproduce\.py/g)).toHaveLength(1);
