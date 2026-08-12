@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { ExperimentRequest, TaskNode } from "../src/contracts/types.js";
-import { LocalPythonWorker } from "../src/execution/python-worker.js";
+import { buildDockerExecutionPlan, LocalPythonWorker } from "../src/execution/python-worker.js";
 import { fileIdentity } from "../src/infrastructure/hash.js";
 
 async function request(root: string, targetColumn: string): Promise<ExperimentRequest> {
@@ -45,7 +45,7 @@ async function request(root: string, targetColumn: string): Promise<ExperimentRe
   };
 }
 
-describe("local Python worker", () => {
+describe("Python workers", () => {
   it("returns a schema-valid structured task failure instead of throwing on runner exit 1", async () => {
     const root = await mkdtemp(join(tmpdir(), "modeling-worker-"));
     await mkdir(resolve(root, "output"), { recursive: true });
@@ -53,5 +53,22 @@ describe("local Python worker", () => {
     expect(result.status).toBe("failed");
     expect(result.error?.class).toBe("data_quality_blocker");
     expect(result.error?.fingerprint).toMatch(/^[a-f0-9]{16}$/);
+  });
+
+  it("rewrites Docker request paths to match read-only input and writable output mounts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "modeling-docker-plan-"));
+    const experimentRequest = await request(root, "target");
+    const plan = buildDockerExecutionPlan(experimentRequest, { image: "modeling-agent-python:test" });
+
+    expect(plan.containerRequest.output_dir).toBe("/workspace/output");
+    expect(plan.containerRequest.data_files[0]?.absolute_path).toBe("/workspace/input/0/data.csv");
+    expect(JSON.stringify(plan.containerRequest)).not.toContain(root);
+    expect(plan.args).toEqual(expect.arrayContaining([
+      "--workdir", "/opt/modeling-agent",
+      "-v", `${resolve(root, "data.csv")}:/workspace/input/0/data.csv:ro`,
+      "-v", `${resolve(root, "output")}:/workspace/output:rw`,
+      "modeling-agent-python:test", "python", "-m", "modeling_agent.runner", "--request", "/workspace/output/experiment-request.json"
+    ]));
+    expect(plan.args.filter((argument) => argument.endsWith(":ro"))).toContain(`${resolve(root, "data.csv")}:/workspace/input/0/data.csv:ro`);
   });
 });

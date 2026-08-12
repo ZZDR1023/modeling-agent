@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { access, appendFile, cp, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, appendFile, cp, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { spawn } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { SchemaRegistry } from "../src/contracts/schema-registry.js";
 import type { ExperimentResult } from "../src/contracts/types.js";
@@ -8,6 +9,20 @@ import type { PythonWorker } from "../src/execution/python-worker.js";
 import { Orchestrator } from "../src/orchestrator/orchestrator.js";
 
 const fixture = join(process.cwd(), "tests", "fixtures", "basic");
+
+function runCommand(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv = process.env): Promise<{ code: number; stdout: string; stderr: string }> {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(command, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => { stdout += chunk; });
+    child.stderr.on("data", (chunk: string) => { stderr += chunk; });
+    child.once("error", reject);
+    child.once("close", (code) => resolvePromise({ code: code ?? 1, stdout, stderr }));
+  });
+}
 
 describe("fake local vertical slice", () => {
   it("runs the package through execution, evidence, report, and export", async () => {
@@ -52,6 +67,24 @@ describe("fake local vertical slice", () => {
     expect(await readFile(resolve(projectRoot, "deliverables/report.md"), "utf8")).toContain("## Experiment Results");
     expect((await readFile(resolve(projectRoot, "deliverables/report.pdf"))).subarray(0, 5).toString()).toBe("%PDF-");
     expect((await readFile(result.projectArchive)).subarray(0, 2).toString()).toBe("PK");
+    const archiveEntries = (await runCommand("unzip", ["-Z1", result.projectArchive], process.cwd())).stdout.trim().split("\n");
+    expect(archiveEntries.filter((path) => path.endsWith("/experiment-request.json"))).toHaveLength(9);
+    expect(archiveEntries.filter((path) => path.endsWith("/experiment-result.json"))).toHaveLength(9);
+    expect(archiveEntries.some((path) => path.includes("/figures/") && path.endsWith(".png"))).toBe(true);
+    expect(archiveEntries.some((path) => path.includes("/tables/") && path.endsWith(".csv"))).toBe(true);
+    expect(archiveEntries).toEqual(expect.arrayContaining([
+      "reproduce.py",
+      "reproducibility/environment/requirements.lock",
+      "reproducibility/environment/Dockerfile",
+      "reproducibility/python/modeling_agent/runner.py"
+    ]));
+    expect(archiveEntries.some((path) => path.endsWith(".aux"))).toBe(false);
+    for (const path of archiveEntries.filter((entry) => /(?:\.(?:json|md|tex|log|py|txt|lock|csv)|Dockerfile)$/.test(entry))) {
+      const content = (await runCommand("unzip", ["-p", result.projectArchive, path], process.cwd())).stdout;
+      expect(content, path).not.toContain("/home/");
+      expect(content, path).not.toContain("/tmp/");
+      expect(content, path).not.toContain("runs.sqlite");
+    }
     await appendFile(resolve(packageRoot, "measurements.csv"), "2024-02-10,41,1,83,A\n", "utf8");
     const frozen = await readFile(resolve(projectRoot, "reproducibility/inputs/measurements.csv"), "utf8");
     expect(frozen).not.toContain("2024-02-10,41,1,83,A");
@@ -88,18 +121,24 @@ describe("fake local vertical slice", () => {
     expect(orchestrator.listRuns()[0]?.status).toBe("failed");
   });
 
-  it("reproduces a completed run into a separately verified archive", async () => {
+  it("reproduces a completed archive after unpacking without the repository or run database", async () => {
     const root = await mkdtemp(join(tmpdir(), "modeling-reproduce-"));
-    const orchestrator = new Orchestrator({ runsRoot: root });
+    const orchestrator = new Orchestrator({ runsRoot: resolve(root, "runs") });
     const packageRoot = resolve(root, "package");
     await cp(fixture, packageRoot, { recursive: true });
     const first = await orchestrator.run(packageRoot, { runtimeKind: "fake", executionKind: "local" });
+    const unpacked = resolve(root, "arbitrary", "unpacked-project");
+    await import("node:fs/promises").then(({ mkdir }) => mkdir(unpacked, { recursive: true }));
+    const unzip = await runCommand("unzip", ["-q", first.projectArchive, "-d", unpacked], root);
+    expect(unzip.code, unzip.stderr).toBe(0);
     await rm(packageRoot, { recursive: true, force: true });
-    const reproduced = await orchestrator.reproduce(first.run.id);
+    await rm(resolve(root, "runs"), { recursive: true, force: true });
 
-    expect(reproduced.status).toBe("completed");
-    expect(reproduced.sourceRunId).toBe(first.run.id);
-    await access(reproduced.projectArchive);
-    expect(reproduced.taskResults.every((item) => item.status === "success")).toBe(true);
-  }, 120_000);
+    const reproduced = await runCommand("python3", ["reproduce.py"], unpacked, { ...process.env, PYTHONPATH: "" });
+    expect(reproduced.code, `${reproduced.stdout}\n${reproduced.stderr}`).toBe(0);
+    const manifest = JSON.parse(await readFile(resolve(unpacked, "reproduced", "reproduction-result.json"), "utf8")) as { task_count: number; verified_task_count: number; report_pdf: string };
+    expect(manifest).toMatchObject({ task_count: 9, verified_task_count: 9, report_pdf: "deliverables/report.pdf" });
+    expect((await readFile(resolve(unpacked, "reproduced", "deliverables", "report.pdf"))).subarray(0, 5).toString()).toBe("%PDF-");
+    expect((await readdir(resolve(unpacked, "reproduced", "experiments"))).sort()).toHaveLength(9);
+  }, 180_000);
 });

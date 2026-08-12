@@ -99,6 +99,43 @@ export interface DockerPythonWorkerOptions {
   pythonRoot?: string;
 }
 
+export interface DockerExecutionPlan {
+  containerRequest: ExperimentRequest;
+  args: string[];
+}
+
+function containerInputPath(file: ExperimentRequest["data_files"][number], index: number): string {
+  const filename = file.relative_path.split("/").at(-1) ?? `input-${index}`;
+  return `/workspace/input/${index}/${filename}`;
+}
+
+export function buildDockerExecutionPlan(
+  request: ExperimentRequest,
+  options: { image: string }
+): DockerExecutionPlan {
+  const outputDir = resolve(request.output_dir);
+  const containerRequest: ExperimentRequest = {
+    ...request,
+    output_dir: "/workspace/output",
+    data_files: request.data_files.map((file, index) => ({
+      ...file,
+      absolute_path: containerInputPath(file, index)
+    }))
+  };
+  const args = [
+    "run", "--rm", "--network", "none", "--read-only", "--cap-drop", "ALL",
+    "--security-opt", "no-new-privileges", "--pids-limit", "256", "--memory", "2g", "--cpus", "2",
+    "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
+    "--workdir", "/opt/modeling-agent",
+    "-v", `${outputDir}:/workspace/output:rw`
+  ];
+  for (const [index, file] of request.data_files.entries()) {
+    args.push("-v", `${resolve(file.absolute_path)}:${containerInputPath(file, index)}:ro`);
+  }
+  args.push(options.image, "python", "-m", "modeling_agent.runner", "--request", "/workspace/output/experiment-request.json");
+  return { containerRequest, args };
+}
+
 export class DockerPythonWorker implements PythonWorker {
   readonly kind = "docker" as const;
   readonly #image: string;
@@ -107,7 +144,7 @@ export class DockerPythonWorker implements PythonWorker {
   readonly #schemas: SchemaRegistry;
 
   constructor(options: DockerPythonWorkerOptions = {}, schemas = new SchemaRegistry()) {
-    this.#image = options.image ?? "python:3.11-slim";
+    this.#image = options.image ?? process.env.MODELING_AGENT_PYTHON_IMAGE ?? "modeling-agent-python:0.1-alpha";
     this.#timeoutMs = options.timeoutMs ?? 900_000;
     this.#pythonRoot = resolve(options.pythonRoot ?? new URL("../../python/", import.meta.url).pathname);
     this.#schemas = schemas;
@@ -117,28 +154,11 @@ export class DockerPythonWorker implements PythonWorker {
     const outputDir = resolve(request.output_dir);
     await mkdir(outputDir, { recursive: true });
     const requestPath = resolve(outputDir, "experiment-request.json");
-    await writeFile(requestPath, `${JSON.stringify(request, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-    const containerRequest = {
-      ...request,
-      output_dir: "/workspace/output",
-      data_files: request.data_files.map((file, index) => ({ ...file, absolute_path: `/workspace/input/${index}/${file.relative_path.split("/").at(-1) ?? `input-${index}`}` }))
-    };
-    await writeFile(requestPath, `${JSON.stringify(containerRequest, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-    const args = [
-      "run", "--rm", "--network", "none", "--read-only", "--cap-drop", "ALL",
-      "--security-opt", "no-new-privileges", "--pids-limit", "256", "--memory", "2g", "--cpus", "2",
-      "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
-      "-v", `${this.#pythonRoot}:/workspace/python:ro`,
-      "-v", `${outputDir}:/workspace/output:rw`
-    ];
-    for (const [index, file] of request.data_files.entries()) {
-      const filename = file.relative_path.split("/").at(-1) ?? `input-${index}`;
-      args.push("-v", `${resolve(file.absolute_path)}:/workspace/input/${index}/${filename}:ro`);
-    }
-    args.push(this.#image, "python", "-m", "modeling_agent.runner", "--request", "/workspace/output/experiment-request.json");
+    const plan = buildDockerExecutionPlan(request, { image: this.#image });
+    await writeFile(requestPath, `${JSON.stringify(plan.containerRequest, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
     let result: { code: number; stdout: string; stderr: string };
     try {
-      result = await runProcess("docker", args, { cwd: this.#pythonRoot, timeoutMs: this.#timeoutMs });
+      result = await runProcess("docker", plan.args, { cwd: this.#pythonRoot, timeoutMs: this.#timeoutMs });
     } catch (error) {
       throw new PythonWorkerError("docker_unavailable", error instanceof Error ? error.message : String(error));
     }

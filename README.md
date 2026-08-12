@@ -59,7 +59,9 @@ npm run cli -- reproduce <run-id>
 
 Use `--runs-root <path>` before the subcommand to select a separate run database/workspace, and add `--json` to a subcommand for machine-readable output. The fake runtime is deterministic and intended for tests; the pi SDK runtime remains optional and isolated behind `AgentRuntime`.
 
-The local execution path is the supported alpha baseline. Docker execution is constrained with no network, a read-only root, resource limits, read-only input mounts, and a writable output mount; the default `python:3.11-slim` image does not bundle the numerical stack, so configure a compatible image before expecting Docker tasks to succeed. Report generation always emits `report.md`, `report.tex`, and a real `report.pdf`; when XeLaTeX is unavailable or the TeX source cannot compile, a built-in PDF renderer is used and `report-status.json` records the limitation.
+The local execution path is the supported alpha baseline. Build the pinned Docker worker image with `docker build -t modeling-agent-python:0.1-alpha python/`, then set `MODELING_AGENT_PYTHON_IMAGE=modeling-agent-python:0.1-alpha` (or pass the equivalent worker option); Docker execution uses module invocation, no network, a read-only root, resource limits, read-only per-input mounts, and a writable output mount. Report generation always emits `report.md`, `report.tex`, and a real `report.pdf`; when XeLaTeX is unavailable or the TeX source cannot compile, a built-in PDF renderer is used and `report-status.json` records the limitation.
+
+Every exported `project.zip` is standalone: unpack it anywhere and run `python3 reproduce.py`. The package contains frozen requests/results, committed figures and tables, the Python execution source, a pinned requirements manifest and Dockerfile, and a package manifest; reproduction re-executes every frozen request, verifies semantic results plus artifact hashes, and rebuilds `reproduced/deliverables/report.pdf` without the original repository, application, SQLite database, or run ID.
 
 ## Security
 
