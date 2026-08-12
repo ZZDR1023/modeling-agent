@@ -116,7 +116,7 @@ describe("fake local vertical slice", () => {
       "reproducibility/python/modeling_agent/runner.py"
     ]));
     const projectReadme = await readFile(resolve(projectRoot, "README.md"), "utf8");
-    expect(projectReadme).toContain("The frozen experiment records were originally produced and verified with Python 3.10.12.");
+    expect(projectReadme).toMatch(/The frozen experiment records were originally produced and verified with Python 3\.\d+\.\d+\./);
     expect(projectReadme).toContain("a Python environment compatible with the packaged `requirements.lock`");
     expect(projectReadme).toContain("the packaged Dockerfile's fixed environment");
     expect(projectReadme).not.toContain("Python 3.10.12 is required");
@@ -217,8 +217,25 @@ describe("fake local vertical slice", () => {
 
     const reproduced = await runCommand("python3", ["reproduce.py"], unpacked, { ...process.env, PYTHONPATH: "" });
     expect(reproduced.code, `${reproduced.stdout}\n${reproduced.stderr}`).toBe(0);
-    const manifest = JSON.parse(await readFile(resolve(unpacked, "reproduced", "reproduction-result.json"), "utf8")) as { task_count: number; verified_task_count: number; report_pdf: string };
-    expect(manifest).toMatchObject({ task_count: 9, verified_task_count: 9, report_pdf: "deliverables/report.pdf" });
+    const manifest = JSON.parse(await readFile(resolve(unpacked, "reproduced", "reproduction-result.json"), "utf8")) as {
+      status: string;
+      task_count: number;
+      verified_task_count: number;
+      tasks: Array<{ verified_artifact_count: number }>;
+      report_pdf: string;
+      report_renderer: "xelatex" | "builtin";
+      warning: string | null;
+    };
+    expect(manifest).toMatchObject({ status: "success", task_count: 9, verified_task_count: 9, report_pdf: "deliverables/report.pdf" });
+    if (manifest.report_renderer === "xelatex") {
+      expect(manifest.warning).toBeNull();
+    } else {
+      expect(manifest.report_renderer).toBe("builtin");
+      expect(manifest.warning).toMatch(/xelatex/i);
+      expect(manifest.warning).toMatch(/(?:unavailable|fail)/i);
+      expect(manifest.warning).toMatch(/bundled.*fallback/i);
+    }
+    expect(manifest.tasks.reduce((total, task) => total + task.verified_artifact_count, 0)).toBe(40);
     expect((await readFile(resolve(unpacked, "reproduced", "deliverables", "report.pdf"))).subarray(0, 5).toString()).toBe("%PDF-");
     expect((await readdir(resolve(unpacked, "reproduced", "experiments"))).sort()).toHaveLength(9);
   }, 180_000);

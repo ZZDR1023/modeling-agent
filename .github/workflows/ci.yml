@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install Node.js dependencies
+        run: npm ci
+
+      - name: Install Python dependencies
+        run: python3 -m pip install -r python/requirements.lock
+
+      - name: Check
+        run: npm run check
+
+      - name: Build
+        run: npm run build
+
+      - name: Smoke
+        run: |
+          set -euo pipefail
+          RUNS_ROOT="$(mktemp -d)"
+          export MODELING_AGENT_RUNS_ROOT="$RUNS_ROOT"
+          npm run smoke
+
+          archive_count="$(find "$RUNS_ROOT" -type f -name 'project.zip' -print | wc -l)"
+          test "$archive_count" -eq 1
+          archive="$(find "$RUNS_ROOT" -type f -name 'project.zip' -print -quit)"
+
+          isolated_root="$(mktemp -d)"
+          cp "$archive" "$isolated_root/project.zip"
+          unzip -q "$isolated_root/project.zip" -d "$isolated_root/project"
+          rm -rf "$RUNS_ROOT"
+          unset MODELING_AGENT_RUNS_ROOT
+
+          cd "$isolated_root/project"
+          python3 reproduce.py
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          result = json.loads(Path("reproduced/reproduction-result.json").read_text(encoding="utf-8"))
+          artifact_count = sum(task.get("verified_artifact_count", 0) for task in result.get("tasks", []))
+          assert result.get("status") == "success", result
+          assert result.get("verified_task_count") == 9, result
+          assert artifact_count == 40, {"artifact_count": artifact_count, "result": result}
+          renderer = result.get("report_renderer")
+          warning = result.get("warning")
+          if renderer == "xelatex":
+              assert warning is None, result
+          elif renderer == "builtin":
+              assert isinstance(warning, str) and warning, result
+              normalized_warning = warning.lower()
+              assert "xelatex" in normalized_warning, result
+              assert "unavailable" in normalized_warning or "fail" in normalized_warning, result
+              assert "bundled" in normalized_warning and "fallback" in normalized_warning, result
+          else:
+              raise AssertionError(result)
+          pdf = Path("reproduced") / result["report_pdf"]
+          assert pdf.read_bytes().startswith(b"%PDF-"), pdf
+          PY

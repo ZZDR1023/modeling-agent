@@ -199,9 +199,9 @@ def _build_report() -> tuple[str, str | None]:
         if completed.returncode == 0 and (deliverables / "report.pdf").is_file():
             renderer = "xelatex"
         else:
-            warning = f"xelatex exited with {completed.returncode}"
+            warning = f"XeLaTeX failed with exit code {completed.returncode}; used the bundled PDF fallback renderer"
     else:
-        warning = "xelatex is unavailable"
+        warning = "XeLaTeX is unavailable; used the bundled PDF fallback renderer"
     if renderer == "builtin":
         title = _read_json(REPRODUCIBILITY / "problem-spec.json").get("title", "Reproduced report")
         (deliverables / "report.pdf").write_bytes(_fallback_pdf(str(title), markdown.read_text(encoding="utf-8")))
