@@ -1,5 +1,7 @@
 # Modeling Agent
 
+[![CI](https://github.com/ZZDR1023/modeling-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/ZZDR1023/modeling-agent/actions/workflows/ci.yml)
+
 `modeling-agent` is a local mathematical-modeling competition agent. It turns a problem package into a typed task graph, executes real Python experiments, records an evidence trail, and exports a reproducible project package.
 
 The current target is `v0.1-alpha`: broad support for common task families with explicit evidence levels. It is not a claim that every modeling problem can be solved reliably or at award-winning quality.
