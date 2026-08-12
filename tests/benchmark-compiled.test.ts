@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -17,8 +17,21 @@ async function runNode(args: string[], timeout = 15_000): Promise<{ stdout: stri
   });
 }
 
+async function ensureBenchmarkBuild(): Promise<void> {
+  try {
+    await access(resolve(repositoryRoot, "dist/src/benchmark/run-synthetic.js"));
+  } catch {
+    await execFileAsync(resolve(repositoryRoot, "node_modules/.bin/tsc"), ["-p", "tsconfig.build.json"], {
+      cwd: repositoryRoot,
+      timeout: 60_000,
+      env: { ...process.env, NODE_NO_WARNINGS: "1" }
+    });
+  }
+}
+
 describe("compiled benchmark entrypoints", () => {
   it("runs the built synthetic CLI from the repository root without exposing the host output path", async () => {
+    await ensureBenchmarkBuild();
     const output = await mkdtemp(join(tmpdir(), "benchmark-compiled-output-"));
     const { stdout, stderr } = await runNode(["dist/src/benchmark/run-synthetic.js", "--output", output]);
 
@@ -39,6 +52,7 @@ describe("compiled benchmark entrypoints", () => {
   });
 
   it("keeps a referenced timeout alive in an otherwise handle-free child process until a hard-error result is emitted", async () => {
+    await ensureBenchmarkBuild();
     const fixture = await mkdtemp(join(tmpdir(), "benchmark-timeout-child-"));
     const child = resolve(fixture, "timeout-child.mjs");
     await writeFile(child, `
