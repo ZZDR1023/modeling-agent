@@ -1,0 +1,6 @@
+{
+  "case_id": "synthetic-custom-threshold",
+  "required_task_types": ["statistical_analysis", "custom_experiment"],
+  "hard_checks": ["custom-check-produced"],
+  "scoring_note": "Confirm that the nonstandard threshold is implemented as an experimental task and that its conclusion is bound to generated evidence. This scoring-only material must never be placed in the solve adapter context."
+}

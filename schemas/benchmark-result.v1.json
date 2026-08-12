@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://modeling-agent.local/schemas/benchmark-result.v1.json",
+  "title": "BenchmarkResultV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "case_id", "variant", "adapter_id", "run_id", "frozen_case_sha256", "state", "outcome", "observed_task_types", "hard_checks", "policy_events", "error", "metrics"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "case_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,63}$" },
+    "variant": { "enum": ["agent", "one_shot"] },
+    "adapter_id": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "run_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{7,127}$" },
+    "frozen_case_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "state": { "enum": ["measured", "not_run", "blocked"] },
+    "outcome": { "enum": ["completed", "incomplete", "hard_error", "blocked_policy", "not_run"] },
+    "observed_task_types": { "$ref": "#/$defs/taskTypes" },
+    "hard_checks": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,63}$" },
+          "status": { "enum": ["passed", "failed", "blocked", "not_run"] },
+          "note": { "type": "string", "minLength": 1, "maxLength": 500 }
+        }
+      }
+    },
+    "policy_events": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "action", "fingerprint"],
+        "properties": {
+          "type": { "const": "same_problem_answer_detected" },
+          "action": { "const": "blocked" },
+          "fingerprint": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+    "error": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["class", "message"],
+          "properties": {
+            "class": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "message": { "type": "string", "minLength": 1, "maxLength": 500 },
+            "fingerprint": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+          }
+        }
+      ]
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["completion", "hard_error", "wall_time_ms", "task_type_coverage", "custom_experiment_present", "token_count", "cost_usd", "human_review_minutes", "human_review_notes", "artifact_count", "evidence_count", "commit_identity", "environment_identity"],
+      "properties": {
+        "completion": { "$ref": "#/$defs/booleanMetric" },
+        "hard_error": { "$ref": "#/$defs/booleanMetric" },
+        "wall_time_ms": { "$ref": "#/$defs/nonNegativeNumberMetric" },
+        "task_type_coverage": { "$ref": "#/$defs/fractionMetric" },
+        "custom_experiment_present": { "$ref": "#/$defs/booleanMetric" },
+        "token_count": { "$ref": "#/$defs/nonNegativeIntegerMetric" },
+        "cost_usd": { "$ref": "#/$defs/nonNegativeNumberMetric" },
+        "human_review_minutes": { "$ref": "#/$defs/nonNegativeNumberMetric" },
+        "human_review_notes": { "$ref": "#/$defs/stringMetric" },
+        "artifact_count": { "$ref": "#/$defs/nonNegativeIntegerMetric" },
+        "evidence_count": { "$ref": "#/$defs/nonNegativeIntegerMetric" },
+        "commit_identity": { "$ref": "#/$defs/stringMetric" },
+        "environment_identity": { "$ref": "#/$defs/stringMetric" }
+      }
+    }
+  },
+  "$defs": {
+    "unmeasuredMetric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "value", "reason"],
+      "properties": {
+        "status": { "enum": ["unavailable", "not_run", "blocked"] },
+        "value": { "type": "null" },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 300 }
+      }
+    },
+    "measuredBoolean": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "value", "source"],
+      "properties": { "status": { "const": "measured" }, "value": { "type": "boolean" }, "source": { "type": "string", "minLength": 1, "maxLength": 200 } }
+    },
+    "measuredNumber": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "value", "source"],
+      "properties": { "status": { "const": "measured" }, "value": { "type": "number", "minimum": 0 }, "source": { "type": "string", "minLength": 1, "maxLength": 200 } }
+    },
+    "measuredInteger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "value", "source"],
+      "properties": { "status": { "const": "measured" }, "value": { "type": "integer", "minimum": 0 }, "source": { "type": "string", "minLength": 1, "maxLength": 200 } }
+    },
+    "measuredFraction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "value", "source"],
+      "properties": { "status": { "const": "measured" }, "value": { "type": "number", "minimum": 0, "maximum": 1 }, "source": { "type": "string", "minLength": 1, "maxLength": 200 } }
+    },
+    "measuredString": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "value", "source"],
+      "properties": { "status": { "const": "measured" }, "value": { "type": "string", "minLength": 1, "maxLength": 500 }, "source": { "type": "string", "minLength": 1, "maxLength": 200 } }
+    },
+    "booleanMetric": { "oneOf": [{ "$ref": "#/$defs/measuredBoolean" }, { "$ref": "#/$defs/unmeasuredMetric" }] },
+    "nonNegativeNumberMetric": { "oneOf": [{ "$ref": "#/$defs/measuredNumber" }, { "$ref": "#/$defs/unmeasuredMetric" }] },
+    "nonNegativeIntegerMetric": { "oneOf": [{ "$ref": "#/$defs/measuredInteger" }, { "$ref": "#/$defs/unmeasuredMetric" }] },
+    "fractionMetric": { "oneOf": [{ "$ref": "#/$defs/measuredFraction" }, { "$ref": "#/$defs/unmeasuredMetric" }] },
+    "stringMetric": { "oneOf": [{ "$ref": "#/$defs/measuredString" }, { "$ref": "#/$defs/unmeasuredMetric" }] },
+    "taskType": { "enum": ["statistical_analysis", "regression_prediction", "time_series_forecasting", "classification", "clustering", "evaluation_ranking", "optimization", "simulation", "custom_experiment"] },
+    "taskTypes": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/taskType" } }
+  }
+}
