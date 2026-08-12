@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { access, appendFile, cp, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, posix, resolve } from "node:path";
 import { SchemaRegistry } from "../src/contracts/schema-registry.js";
 import type { ExperimentResult } from "../src/contracts/types.js";
 import type { PythonWorker } from "../src/execution/python-worker.js";
@@ -22,6 +22,15 @@ function runCommand(command: string, args: string[], cwd: string, env: NodeJS.Pr
     child.once("error", reject);
     child.once("close", (code) => resolvePromise({ code: code ?? 1, stdout, stderr }));
   });
+}
+
+function dockerCopySources(dockerfile: string): string[] {
+  const sources: string[] = [];
+  for (const line of dockerfile.split("\n")) {
+    const match = /^COPY\s+(\S+)\s+\S+\s*$/.exec(line.trim());
+    if (match?.[1]) sources.push(match[1]);
+  }
+  return sources;
 }
 
 describe("fake local vertical slice", () => {
@@ -73,11 +82,40 @@ describe("fake local vertical slice", () => {
     expect(archiveEntries.some((path) => path.includes("/figures/") && path.endsWith(".png"))).toBe(true);
     expect(archiveEntries.some((path) => path.includes("/tables/") && path.endsWith(".csv"))).toBe(true);
     expect(archiveEntries).toEqual(expect.arrayContaining([
+      "README.md",
       "reproduce.py",
       "reproducibility/environment/requirements.lock",
       "reproducibility/environment/Dockerfile",
       "reproducibility/python/modeling_agent/runner.py"
     ]));
+    const projectReadme = await readFile(resolve(projectRoot, "README.md"), "utf8");
+    expect(projectReadme).toContain("Python 3.11");
+    expect(projectReadme).toContain("python3 -m venv .venv");
+    expect(projectReadme).toContain("pip install -r reproducibility/environment/requirements.lock");
+    expect(projectReadme.match(/python3 reproduce\.py/g)).toHaveLength(1);
+    expect(projectReadme).toContain("docker build -f reproducibility/environment/Dockerfile -t modeling-project-reproducer .");
+    expect(projectReadme).toContain("docker run --rm modeling-project-reproducer");
+    expect(projectReadme).toContain("offline");
+    expect(projectReadme).not.toContain(basename(result.workspacePath));
+    expect(projectReadme).not.toContain(process.cwd());
+
+    const dockerfile = await readFile(resolve(projectRoot, "reproducibility/environment/Dockerfile"), "utf8");
+    expect(dockerfile).toContain("# Build context: exported project root");
+    expect(dockerfile).toContain('CMD ["python", "reproduce.py"]');
+    const copySources = dockerCopySources(dockerfile);
+    expect(copySources).toEqual(expect.arrayContaining([
+      "reproducibility/environment/requirements.lock",
+      "reproducibility/python/modeling_agent",
+      "reproduce.py",
+      "deliverables",
+      "reproducibility/inputs",
+      "reproducibility/experiments"
+    ]));
+    for (const source of copySources) {
+      expect(isAbsolute(source), source).toBe(false);
+      expect(posix.normalize(source), source).not.toMatch(/^\.\.\//);
+      await access(resolve(projectRoot, source));
+    }
     expect(archiveEntries.some((path) => path.endsWith(".aux"))).toBe(false);
     for (const path of archiveEntries.filter((entry) => /(?:\.(?:json|md|tex|log|py|txt|lock|csv)|Dockerfile)$/.test(entry))) {
       const content = (await runCommand("unzip", ["-p", result.projectArchive, path], process.cwd())).stdout;

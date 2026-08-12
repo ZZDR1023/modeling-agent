@@ -247,6 +247,7 @@ export class Orchestrator {
         runId: id,
         projectRoot: resolve(workspacePath, "project"),
         reproduction: { runtimeKind: options.runtimeKind, executionKind: options.executionKind },
+        ...(taskResults[0]?.runtime.python_version ? { pythonVersion: taskResults[0].runtime.python_version } : {}),
         problem,
         graph,
         evaluationContracts,
@@ -262,7 +263,7 @@ export class Orchestrator {
         committedExperimentsRoot: resolve(workspacePath, "committed", "experiments"),
         pythonSourceRoot: resolve(new URL("../../python/modeling_agent", import.meta.url).pathname),
         pythonRequirementsPath: resolve(new URL("../../python/requirements.lock", import.meta.url).pathname),
-        pythonDockerfilePath: resolve(new URL("../../python/Dockerfile", import.meta.url).pathname)
+        pythonDockerfilePath: resolve(new URL("../../python/standalone.Dockerfile", import.meta.url).pathname)
       }));
 
       const projectArchive = await this.#stage(id, "export", async () => {

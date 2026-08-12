@@ -102,5 +102,13 @@ describe("ReportBuilder evidence channel", () => {
     expect(markdown).not.toContain("score: 111");
     expect(markdown).toContain("evidence-3333333333333333");
     expect(markdown).toContain("evidence-4444444444444444");
+
+    const projectReadme = await readFile(resolve(report.projectRoot, "README.md"), "utf8");
+    expect(projectReadme).toContain("Python 3.11");
+    expect(projectReadme).toContain("pip install -r reproducibility/environment/requirements.lock");
+    expect(projectReadme.match(/python3 reproduce\.py/g)).toHaveLength(1);
+    expect(projectReadme).toContain("docker build -f reproducibility/environment/Dockerfile -t modeling-project-reproducer .");
+    expect(projectReadme).not.toContain("run-report");
+    expect(projectReadme).not.toContain(root);
   });
 });

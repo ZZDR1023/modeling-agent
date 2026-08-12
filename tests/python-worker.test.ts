@@ -58,17 +58,27 @@ describe("Python workers", () => {
   it("rewrites Docker request paths to match read-only input and writable output mounts", async () => {
     const root = await mkdtemp(join(tmpdir(), "modeling-docker-plan-"));
     const experimentRequest = await request(root, "target");
-    const plan = buildDockerExecutionPlan(experimentRequest, { image: "modeling-agent-python:test" });
+    const plan = buildDockerExecutionPlan(experimentRequest, {
+      image: "modeling-agent-python:test",
+      hostUser: { uid: 12345, gid: 23456 }
+    });
 
     expect(plan.containerRequest.output_dir).toBe("/workspace/output");
     expect(plan.containerRequest.data_files[0]?.absolute_path).toBe("/workspace/input/0/data.csv");
     expect(JSON.stringify(plan.containerRequest)).not.toContain(root);
     expect(plan.args).toEqual(expect.arrayContaining([
+      "--user", "12345:23456",
+      "--read-only",
       "--workdir", "/opt/modeling-agent",
       "-v", `${resolve(root, "data.csv")}:/workspace/input/0/data.csv:ro`,
       "-v", `${resolve(root, "output")}:/workspace/output:rw`,
       "modeling-agent-python:test", "python", "-m", "modeling_agent.runner", "--request", "/workspace/output/experiment-request.json"
     ]));
+    expect(plan.args[plan.args.indexOf("--user") + 1]).toBe("12345:23456");
     expect(plan.args.filter((argument) => argument.endsWith(":ro"))).toContain(`${resolve(root, "data.csv")}:/workspace/input/0/data.csv:ro`);
+    expect(plan.args.filter((argument) => argument.endsWith(":rw"))).toContain(`${resolve(root, "output")}:/workspace/output:rw`);
+    expect(plan.args.slice(-6)).toEqual([
+      "modeling-agent-python:test", "python", "-m", "modeling_agent.runner", "--request", "/workspace/output/experiment-request.json"
+    ]);
   });
 });

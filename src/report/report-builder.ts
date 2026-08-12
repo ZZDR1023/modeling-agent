@@ -13,6 +13,7 @@ export interface ReportBuildInput {
     runtimeKind: "fake" | "pi";
     executionKind: "local" | "docker";
   };
+  pythonVersion?: string;
   problem: ProblemSpec;
   graph: TaskGraph;
   evaluationContracts: Record<string, unknown>;
@@ -94,6 +95,53 @@ function evidenceMetricLines(evidence: TaskEvidence): string[] {
 
 function artifactDisplay(node: EvidenceNode): string {
   return typeof node.value === "string" ? node.value : node.label;
+}
+
+function projectReadme(pythonVersion: string): string {
+  return `# Reproducible Modeling Project
+
+This archive is a standalone snapshot of a completed modeling project. It contains the final report, frozen inputs and experiment records, the Python execution source, and manifests used to verify reproduced outputs.
+
+## Contents
+
+- \`deliverables/\`: frozen report source, PDF, and renderer status.
+- \`reproducibility/inputs/\`: frozen problem statement and input data.
+- \`reproducibility/experiments/\`: frozen requests, expected results, figures, tables, and JSON artifacts.
+- \`reproducibility/python/\`: packaged experiment runtime source.
+- \`reproducibility/environment/\`: locked Python dependencies and the standalone Dockerfile.
+- \`reproduce.py\`: package verification, experiment replay, artifact hash checks, and PDF rebuild.
+
+## Local reproduction
+
+Python ${pythonVersion} is required. From the extracted project root, create an isolated environment and install the locked dependencies (this installation requires access to a compatible Python package index unless the wheels are already cached):
+
+\`\`\`sh
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r reproducibility/environment/requirements.lock
+\`\`\`
+
+Run the single reproduction command from the extracted project root:
+
+\`\`\`sh
+python3 reproduce.py
+\`\`\`
+
+A successful run prints a JSON object with \`"status": "success"\`, reports all frozen tasks as verified, and writes \`reproduced/reproduction-result.json\` plus \`reproduced/deliverables/report.pdf\`.
+
+## Docker reproduction
+
+Use the extracted project root as the build context. Building needs network access to download the base image and locked Python packages unless both are already cached; running the completed image does not require network access.
+
+\`\`\`sh
+docker build -f reproducibility/environment/Dockerfile -t modeling-project-reproducer .
+docker run --rm modeling-project-reproducer
+\`\`\`
+
+## Offline use and known limitations
+
+Reproduction itself uses only packaged files and makes no network requests. A fully offline first-time setup requires a compatible Python 3.11 environment with every locked dependency already installed or cached, or a prebuilt Docker image; the archive does not include dependency wheels or the Docker base image. Results can also vary or fail on unsupported Python versions, platforms without compatible binary packages, insufficient memory, or modified package files. XeLaTeX is optional: if it is absent or cannot compile the report, the bundled fallback renderer still creates a valid PDF and records a warning.
+`;
 }
 
 function markdown(input: ReportBuildInput): string {
@@ -344,6 +392,7 @@ export class ReportBuilder {
     const reportMarkdown = resolve(deliverables, "report.md");
     const reportTex = resolve(deliverables, "report.tex");
     await Promise.all([
+      writeFile(resolve(projectRoot, "README.md"), projectReadme(input.pythonVersion ?? "3.11"), { encoding: "utf8", mode: 0o600 }),
       writeFile(reportMarkdown, markdown(input), { encoding: "utf8", mode: 0o600 }),
       writeFile(reportTex, tex(input), { encoding: "utf8", mode: 0o600 }),
       writeJsonAtomic(resolve(reproducibility, "problem-spec.json"), input.problem),

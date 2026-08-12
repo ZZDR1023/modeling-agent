@@ -104,14 +104,24 @@ export interface DockerExecutionPlan {
   args: string[];
 }
 
+export interface HostUser {
+  uid: number;
+  gid: number;
+}
+
 function containerInputPath(file: ExperimentRequest["data_files"][number], index: number): string {
   const filename = file.relative_path.split("/").at(-1) ?? `input-${index}`;
   return `/workspace/input/${index}/${filename}`;
 }
 
+function currentHostUser(): HostUser | undefined {
+  if (process.platform !== "linux" || !process.getuid || !process.getgid) return undefined;
+  return { uid: process.getuid(), gid: process.getgid() };
+}
+
 export function buildDockerExecutionPlan(
   request: ExperimentRequest,
-  options: { image: string }
+  options: { image: string; hostUser?: HostUser }
 ): DockerExecutionPlan {
   const outputDir = resolve(request.output_dir);
   const containerRequest: ExperimentRequest = {
@@ -122,13 +132,17 @@ export function buildDockerExecutionPlan(
       absolute_path: containerInputPath(file, index)
     }))
   };
+  const hostUser = options.hostUser ?? currentHostUser();
   const args = [
     "run", "--rm", "--network", "none", "--read-only", "--cap-drop", "ALL",
     "--security-opt", "no-new-privileges", "--pids-limit", "256", "--memory", "2g", "--cpus", "2",
-    "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m",
+    "--tmpfs", "/tmp:rw,noexec,nosuid,size=256m"
+  ];
+  if (hostUser) args.push("--user", `${hostUser.uid}:${hostUser.gid}`);
+  args.push(
     "--workdir", "/opt/modeling-agent",
     "-v", `${outputDir}:/workspace/output:rw`
-  ];
+  );
   for (const [index, file] of request.data_files.entries()) {
     args.push("-v", `${resolve(file.absolute_path)}:${containerInputPath(file, index)}:ro`);
   }
