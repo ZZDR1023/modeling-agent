@@ -106,7 +106,51 @@ describe("benchmark aggregate reports", () => {
   });
 
   it("refuses to compare agent and one-shot results from different frozen case bytes", () => {
-    const oneShot = result({ variant: "one_shot", adapter_id: "one-shot-v1", frozen_case_sha256: "b".repeat(64) });
+    const oneShot = result({
+      variant: "one_shot",
+      adapter_id: "one-shot-v1",
+      run_id: "synthetic-report-one-shot-bbbbbbbbbbbb",
+      frozen_case_sha256: "b".repeat(64)
+    });
     expect(() => aggregateBenchmarkResults([result(), oneShot])).toThrow(/do not share a frozen case/i);
+  });
+
+  it("rejects duplicate run ids globally", () => {
+    const duplicate = result({
+      case_id: "synthetic-other",
+      variant: "one_shot",
+      adapter_id: "one-shot-v1"
+    });
+    expect(() => aggregateBenchmarkResults([result(), duplicate])).toThrow(/run id.*unique|duplicate run id/i);
+  });
+
+  it.each(["agent", "one_shot"] as const)("rejects a duplicate %s variant for one case", (variant) => {
+    const first = result({
+      variant,
+      adapter_id: variant === "agent" ? "agent-v1" : "one-shot-v1",
+      run_id: `synthetic-report-${variant.replace("_", "-")}-aaaaaaaaaaaa`
+    });
+    const duplicate = result({
+      variant,
+      adapter_id: variant === "agent" ? "agent-v2" : "one-shot-v2",
+      run_id: `synthetic-report-${variant.replace("_", "-")}-bbbbbbbbbbbb`
+    });
+    expect(() => aggregateBenchmarkResults([first, duplicate])).toThrow(/duplicate.*variant|at most one.*variant/i);
+  });
+
+  it("rejects a third same-case result before contract comparison can ignore it", () => {
+    const agent = result();
+    const baseline = result({
+      variant: "one_shot",
+      adapter_id: "one-shot-v1",
+      run_id: "synthetic-report-one-shot-bbbbbbbbbbbb"
+    });
+    const third = result({
+      adapter_id: "agent-v2",
+      run_id: "synthetic-report-agent-cccccccccccc",
+      evaluation_contract_sha256: "d".repeat(64)
+    });
+
+    expect(() => aggregateBenchmarkResults([agent, baseline, third])).toThrow(/duplicate.*variant|at most one.*variant/i);
   });
 });

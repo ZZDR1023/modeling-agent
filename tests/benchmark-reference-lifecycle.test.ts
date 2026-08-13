@@ -108,9 +108,21 @@ process.stdout.write(JSON.stringify(result));
       await rename(reference, movedReference);
       await writeFile(release, "go");
       const exit = await waitForExit(child);
-      expect(exit.code).toBe(1);
-      expect(exit.stdout).toBe("");
-      expect(exit.stderr).toMatch(/ENOENT|unavailable/i);
+      expect(exit.code).toBe(0);
+      expect(exit.stderr).toBe("");
+      const result = JSON.parse(exit.stdout) as {
+        outcome: string;
+        evaluation_contract_sha256: string;
+        metrics: { reference_leak_check: { status: string; value: unknown } };
+        error: { class: string; message: string } | null;
+      };
+      expect(result.outcome).toBe("hard_error");
+      expect(result.evaluation_contract_sha256).toMatch(/^[a-f0-9]{64}$/);
+      expect(result.metrics.reference_leak_check).toMatchObject({ status: "unavailable", value: null });
+      expect(result.error).toMatchObject({ class: "ReferenceScoringError" });
+      expect(result.error?.message).toMatch(/^failure:[a-f0-9]{12}$/);
+      expect(exit.stdout).not.toContain(root);
+      expect(exit.stdout).not.toContain("REFERENCE-LIFECYCLE-SECRET");
     } finally {
       child.kill("SIGKILL");
     }

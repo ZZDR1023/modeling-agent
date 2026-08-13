@@ -42,16 +42,29 @@ function stableResultOrder(left: BenchmarkResult, right: BenchmarkResult): numbe
   return left.case_id.localeCompare(right.case_id) || left.variant.localeCompare(right.variant) || left.run_id.localeCompare(right.run_id);
 }
 
-function assertComparableVariants(results: readonly BenchmarkResult[]): void {
-  const groups = new Map<string, BenchmarkResult[]>();
+function assertUniqueResults(results: readonly BenchmarkResult[]): Map<string, Map<BenchmarkResult["variant"], BenchmarkResult>> {
+  const runIds = new Set<string>();
+  const groups = new Map<string, Map<BenchmarkResult["variant"], BenchmarkResult>>();
   for (const result of results) {
-    const group = groups.get(result.case_id) ?? [];
-    group.push(result);
-    groups.set(result.case_id, group);
+    if (runIds.has(result.run_id)) {
+      throw new Error(`benchmark run id must be globally unique: ${result.run_id}`);
+    }
+    runIds.add(result.run_id);
+
+    const variants = groups.get(result.case_id) ?? new Map<BenchmarkResult["variant"], BenchmarkResult>();
+    if (variants.has(result.variant)) {
+      throw new Error(`benchmark case ${result.case_id} has a duplicate ${result.variant} variant`);
+    }
+    variants.set(result.variant, result);
+    groups.set(result.case_id, variants);
   }
-  for (const [caseId, group] of groups) {
-    const agent = group.find((result) => result.variant === "agent");
-    const oneShot = group.find((result) => result.variant === "one_shot");
+  return groups;
+}
+
+function assertComparableVariants(groups: ReadonlyMap<string, ReadonlyMap<BenchmarkResult["variant"], BenchmarkResult>>): void {
+  for (const [caseId, variants] of groups) {
+    const agent = variants.get("agent");
+    const oneShot = variants.get("one_shot");
     if (agent && oneShot && agent.frozen_case_sha256 !== oneShot.frozen_case_sha256) {
       throw new Error(`benchmark variants for ${caseId} do not share a frozen case`);
     }
@@ -66,7 +79,8 @@ export function aggregateBenchmarkResults(input: readonly BenchmarkResult[], sui
     throw new Error("benchmark suite id must be a bounded opaque identifier");
   }
   const results = input.map((entry) => validateBenchmarkResult(structuredClone(entry))).sort(stableResultOrder);
-  assertComparableVariants(results);
+  const groups = assertUniqueResults(results);
+  assertComparableVariants(groups);
   const metrics = Object.fromEntries(metricNames.map((name) => [name, aggregateMetric(results.map((result) => result.metrics[name]))])) as Record<keyof BenchmarkMetrics, BenchmarkMetricAggregate>;
   return {
     schema_version: BENCHMARK_SCHEMA_VERSION,
