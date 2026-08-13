@@ -1,0 +1,47 @@
+{
+  "schema_version": "1.0.0",
+  "case_id": "synthetic-custom-threshold",
+  "package_path": "package",
+  "license": {
+    "name": "CC0 1.0 Universal",
+    "spdx_id": "CC0-1.0",
+    "copyright_holder": "modeling-agent contributors",
+    "source_url": null,
+    "redistribution": "permitted",
+    "notice_path": "package/NOTICE.md"
+  },
+  "blind_policy": {
+    "mode": "blind",
+    "solve_input": "package_only",
+    "same_problem_answers": "block",
+    "minimum_reference_match_characters": 48
+  },
+  "reference_policy": {
+    "access": "scoring_only",
+    "availability": "included",
+    "relative_path": "reference/reference.json",
+    "sha256": "456c633600a9ec460944a61b8ce3df247c5ba476b5f11cc7dcb1adfc3852c89e"
+  },
+  "runtime": {
+    "agent_adapter_id": "synthetic-agent-v1",
+    "one_shot_adapter_id": "synthetic-one-shot-v1"
+  },
+  "execution": {
+    "kind": "local",
+    "network_access": "disabled"
+  },
+  "budget": {
+    "max_wall_time_ms": 10000,
+    "max_tokens": 2000,
+    "max_cost_usd": null,
+    "max_human_review_minutes": null
+  },
+  "allowed_task_types": ["statistical_analysis", "custom_experiment"],
+  "expected_task_types": ["statistical_analysis", "custom_experiment"],
+  "hard_checks": [
+    {
+      "id": "custom-check-produced",
+      "description": "A custom threshold experiment artifact and supporting evidence are present."
+    }
+  ]
+}

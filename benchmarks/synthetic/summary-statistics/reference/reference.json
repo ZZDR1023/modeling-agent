@@ -1,0 +1,6 @@
+{
+  "case_id": "synthetic-summary-statistics",
+  "required_task_types": ["statistical_analysis"],
+  "hard_checks": ["summary-produced"],
+  "scoring_note": "Confirm that the solve output reports an evidence-backed summary for every supplied observation. This scoring-only material must never be placed in the solve adapter context."
+}
