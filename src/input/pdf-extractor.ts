@@ -7,8 +7,11 @@ interface PdfExtraction {
   metadata: ProblemExtractionMetadata;
 }
 
+const MAX_CAUSE_LENGTH = 240;
+
 function causeMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  const value = error instanceof Error ? error.message : String(error);
+  return value.replace(/[\r\n\t]+/g, " ").slice(0, MAX_CAUSE_LENGTH);
 }
 
 function isTextItem(item: unknown): item is TextItem {
@@ -64,34 +67,47 @@ export async function extractPdf(
       }
       const pages: string[] = [];
       let characters = 0;
+      const ensureFits = (base: number, additional: number): void => {
+        const actual = base + additional;
+        if (!Number.isSafeInteger(actual) || actual > limits.maxPdfCharacters) {
+          throw new PackageImportError("pdf_character_limit", `PDF extraction exceeds ${limits.maxPdfCharacters} characters.`, {
+            path,
+            actual,
+            limit: limits.maxPdfCharacters
+          });
+        }
+      };
       for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
         const page = await document.getPage(pageNumber);
         const content = await page.getTextContent({ disableNormalization: false, includeMarkedContent: false });
         const textItems = content.items.filter(isTextItem);
+        const leadingPageSeparator = pages.length === 0 ? "" : "\n\n";
+        const pagePieces: string[] = [];
         let pageCharacters = 0;
         for (const item of textItems) {
-          pageCharacters += item.str.length;
-          if (pageCharacters > limits.maxPdfCharacters || characters + pageCharacters > limits.maxPdfCharacters) {
-            throw new PackageImportError("pdf_character_limit", `PDF extraction exceeds ${limits.maxPdfCharacters} characters.`, {
-              path,
-              actual: characters + pageCharacters,
-              limit: limits.maxPdfCharacters
-            });
-          }
+          const itemText = item.str.trim();
+          if (itemText.length === 0) continue;
+          const separator = pagePieces.length === 0 ? "" : " ";
+          const additional = separator.length + itemText.length;
+          if (!Number.isSafeInteger(pageCharacters + additional)) ensureFits(characters, Number.MAX_SAFE_INTEGER);
+          ensureFits(characters, leadingPageSeparator.length + pageCharacters + additional);
+          if (separator) pagePieces.push(separator);
+          pagePieces.push(itemText);
+          pageCharacters += additional;
         }
-        const text = textItems.map((item) => item.str).join(" ").trim();
-        characters += text.length;
-        if (characters > limits.maxPdfCharacters) {
-          throw new PackageImportError("pdf_character_limit", `PDF extraction exceeds ${limits.maxPdfCharacters} characters.`, {
-            path,
-            actual: characters,
-            limit: limits.maxPdfCharacters
-          });
-        }
-        pages.push(text);
+        if (pageCharacters === 0) continue;
+        pages.push(pagePieces.join(""));
+        characters += leadingPageSeparator.length + pageCharacters;
       }
       const text = pages.join("\n\n").trim();
       if (!text) throw new PackageImportError("pdf_empty", "PDF contains no extractable text.", { path });
+      if (text.length > limits.maxPdfCharacters || text.length !== characters) {
+        throw new PackageImportError("pdf_character_limit", `PDF extraction exceeds ${limits.maxPdfCharacters} characters after normalization.`, {
+          path,
+          actual: text.length,
+          limit: limits.maxPdfCharacters
+        });
+      }
       return {
         text,
         metadata: {
@@ -113,7 +129,7 @@ export async function extractPdf(
     if (name === "PasswordException" || /password|encrypted/i.test(message)) {
       throw new PackageImportError("pdf_encrypted", "Encrypted PDF files are not allowed.", { path, cause: message });
     }
-    throw new PackageImportError("pdf_corrupt", `Could not extract PDF text: ${message}`, { path, cause: message });
+    throw new PackageImportError("pdf_corrupt", "Could not extract PDF text.", { path, cause: message });
   } finally {
     await loadingTask.destroy();
   }

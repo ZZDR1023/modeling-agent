@@ -1,4 +1,34 @@
+import { createHash } from "node:crypto";
 import type { DataAsset } from "../contracts/types.js";
+
+const MAX_CAUSE_FINGERPRINT_INPUT = 4096;
+const MAX_PUBLIC_PATH_LENGTH = 160;
+const MAX_PUBLIC_CANDIDATES = 16;
+
+function diagnosticFingerprint(value: string): string {
+  return `sha256:${createHash("sha256").update(value.slice(0, MAX_CAUSE_FINGERPRINT_INPUT)).digest("hex").slice(0, 16)}`;
+}
+
+function isPrivatePath(value: string): boolean {
+  return value.startsWith("/")
+    || value.startsWith("\\")
+    || /^[A-Za-z]:[\\/]/.test(value)
+    || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(value);
+}
+
+function publicDiagnosticPath(value: string | undefined): string | undefined {
+  if (value === undefined || value.length === 0) return undefined;
+  if (/\r|\n|\t/.test(value) || isPrivatePath(value) || value === ".." || value.startsWith("../")) return undefined;
+  if (value.length > MAX_PUBLIC_PATH_LENGTH
+    || value.includes("%")
+    || value.includes("\\")
+    || value.includes("?")
+    || value.includes("#")
+    || value.split("/").some((segment) => segment === ".." || segment === ".")) {
+    return diagnosticFingerprint(value);
+  }
+  return value;
+}
 
 export type PackageImportErrorCode =
   | "ambiguous_problem"
@@ -7,6 +37,7 @@ export type PackageImportErrorCode =
   | "problem_file_limit"
   | "problem_encoding"
   | "package_entry_limit"
+  | "package_depth_limit"
   | "asset_file_limit"
   | "symlink_input"
   | "unsafe_path"
@@ -28,6 +59,36 @@ export type PackageImportErrorCode =
   | "metadata_unreadable"
   | "metadata_limit";
 
+const PUBLIC_ERROR_MESSAGES: Readonly<Record<PackageImportErrorCode, string>> = Object.freeze({
+  ambiguous_problem: "Problem statement selection is ambiguous.",
+  problem_missing: "Package does not contain a supported problem statement.",
+  problem_empty: "Problem statement is empty.",
+  problem_file_limit: "Problem statement exceeds an import limit.",
+  problem_encoding: "Problem statement encoding is invalid.",
+  package_entry_limit: "Package exceeds the filesystem entry limit.",
+  package_depth_limit: "Package exceeds the filesystem depth limit.",
+  asset_file_limit: "An input asset exceeds an import limit.",
+  symlink_input: "Symlink inputs are not allowed.",
+  unsafe_path: "Unsafe path outside package.",
+  pdf_tool_unavailable: "The local PDF extractor is unavailable.",
+  pdf_corrupt: "PDF input could not be parsed.",
+  pdf_encrypted: "Encrypted PDF files are not allowed.",
+  pdf_empty: "PDF contains no extractable text.",
+  pdf_page_limit: "PDF exceeds the page limit.",
+  pdf_character_limit: "PDF extraction exceeds the character limit.",
+  docx_corrupt: "DOCX input could not be parsed.",
+  docx_encrypted: "Encrypted DOCX files are not allowed.",
+  docx_macro_enabled: "Macro-enabled DOCX files are not allowed.",
+  docx_external_relationship: "DOCX contains a non-internal relationship.",
+  docx_zip_slip: "DOCX contains an unsafe archive path.",
+  docx_zip_entry_limit: "DOCX exceeds the archive entry limit.",
+  docx_uncompressed_limit: "DOCX exceeds the uncompressed-byte limit.",
+  docx_character_limit: "DOCX extraction exceeds the character limit.",
+  docx_empty: "DOCX body contains no extractable text.",
+  metadata_unreadable: "Input metadata could not be read safely.",
+  metadata_limit: "Input metadata exceeds an inspection limit."
+});
+
 export interface PackageImportErrorDetails {
   path?: string;
   candidates?: string[];
@@ -41,10 +102,21 @@ export class PackageImportError extends Error {
   readonly details: Readonly<PackageImportErrorDetails>;
 
   constructor(code: PackageImportErrorCode, message: string, details: PackageImportErrorDetails = {}) {
-    super(message, { cause: details.cause });
+    void message;
+    const { cause, path, candidates, ...safeDetails } = details;
+    const normalizedCause = cause?.replace(/[\r\n\t]+/g, " ").slice(0, MAX_CAUSE_FINGERPRINT_INPUT);
+    const boundedCause = normalizedCause === undefined ? undefined : diagnosticFingerprint(normalizedCause);
+    const boundedDetails: PackageImportErrorDetails = { ...safeDetails };
+    const publicPath = publicDiagnosticPath(path);
+    if (publicPath !== undefined) boundedDetails.path = publicPath;
+    if (candidates !== undefined) {
+      boundedDetails.candidates = candidates.slice(0, MAX_PUBLIC_CANDIDATES).map((candidate) => publicDiagnosticPath(candidate) ?? diagnosticFingerprint(candidate));
+    }
+    if (boundedCause !== undefined) boundedDetails.cause = boundedCause;
+    super(PUBLIC_ERROR_MESSAGES[code], boundedCause === undefined ? undefined : { cause: boundedCause });
     this.name = "PackageImportError";
     this.code = code;
-    this.details = Object.freeze({ ...details });
+    this.details = Object.freeze(boundedDetails);
   }
 }
 
@@ -52,6 +124,7 @@ export interface ImportLimits {
   maxProblemBytes: number;
   maxTextCharacters: number;
   maxPackageEntries: number;
+  maxPackageDepth: number;
   maxAssetBytes: number;
   maxPdfPages: number;
   maxPdfCharacters: number;

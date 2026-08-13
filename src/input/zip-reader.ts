@@ -22,8 +22,11 @@ export interface ZipErrorCodes {
   uncompressedLimit: PackageImportErrorCode;
 }
 
+const MAX_CAUSE_LENGTH = 240;
+
 function causeMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  const value = error instanceof Error ? error.message : String(error);
+  return value.replace(/[\r\n\t]+/g, " ").slice(0, MAX_CAUSE_LENGTH);
 }
 
 function openArchive(path: string): Promise<ZipFile> {
@@ -74,10 +77,23 @@ function readEntry(archive: ZipFile, entry: Entry, maximumBytes: number): Promis
 }
 
 function unsafeEntryName(name: string): boolean {
-  return name.includes("\\")
+  return !name
+    || /[\u0000-\u001f\u007f]/.test(name)
+    || name.includes("\\")
     || name.startsWith("/")
     || /^[A-Za-z]:/.test(name)
-    || name.split("/").includes("..");
+    || name.split("/").some((segment) => segment === ".." || segment === ".");
+}
+
+function isUnixSymlink(entry: Entry): boolean {
+  const fileType = (entry.externalFileAttributes >>> 16) & 0o170000;
+  return fileType === 0o120000;
+}
+
+function zipErrorCode(message: string, codes: ZipErrorCodes): PackageImportErrorCode {
+  if (/encrypt|password/i.test(message)) return codes.encrypted;
+  if (/invalid relative path|absolute path|invalid characters in fileName/i.test(message)) return codes.zipSlip;
+  return codes.corrupt;
 }
 
 export async function readBoundedZip(
@@ -91,8 +107,7 @@ export async function readBoundedZip(
     archive = await openArchive(path);
   } catch (error) {
     const message = causeMessage(error);
-    const code = /invalid relative path|absolute path|invalid characters in fileName/i.test(message) ? codes.zipSlip : codes.corrupt;
-    throw new PackageImportError(code, `Could not open ZIP package: ${message}`, { path, cause: message });
+    throw new PackageImportError(zipErrorCode(message, codes), "Could not open ZIP package.", { path, cause: message });
   }
 
   if (archive.entryCount > limits.maxEntries) {
@@ -118,8 +133,7 @@ export async function readBoundedZip(
       if (error instanceof PackageImportError) reject(error);
       else {
         const message = causeMessage(error);
-        const code = /invalid relative path|absolute path|invalid characters in fileName/i.test(message) ? codes.zipSlip : codes.corrupt;
-        reject(new PackageImportError(code, `Could not read ZIP package: ${message}`, { path, cause: message }));
+        reject(new PackageImportError(zipErrorCode(message, codes), "Could not read ZIP package.", { path, cause: message }));
       }
     };
 
@@ -143,6 +157,9 @@ export async function readBoundedZip(
         entryNames.add(entry.fileName);
         if (entry.isEncrypted()) {
           throw new PackageImportError(codes.encrypted, `Encrypted ZIP entry is not allowed: ${entry.fileName}`, { path: entry.fileName });
+        }
+        if (isUnixSymlink(entry)) {
+          throw new PackageImportError(codes.zipSlip, `ZIP symlink entry is not allowed: ${entry.fileName}`, { path: entry.fileName });
         }
         total += entry.uncompressedSize;
         if (!Number.isSafeInteger(total) || total > limits.maxUncompressedBytes) {

@@ -42,6 +42,7 @@ export const DEFAULT_IMPORT_LIMITS: Readonly<ImportLimits> = Object.freeze({
   maxProblemBytes: 32 * 1024 * 1024,
   maxTextCharacters: 2_000_000,
   maxPackageEntries: 10_000,
+  maxPackageDepth: 64,
   maxAssetBytes: 2 * 1024 * 1024 * 1024,
   maxPdfPages: 500,
   maxPdfCharacters: 2_000_000,
@@ -147,31 +148,64 @@ export async function resolveSafePath(rootPath: string, relativePath: string): P
   return candidate;
 }
 
-async function walk(root: string, directory: string, files: string[], limits: ImportLimits): Promise<void> {
+interface WalkState {
+  entries: number;
+}
+
+async function walk(
+  root: string,
+  directory: string,
+  files: string[],
+  limits: ImportLimits,
+  state: WalkState,
+  depth: number
+): Promise<void> {
   const entries = await readdir(directory, { withFileTypes: true });
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name, "en"))) {
-    if (entry.name.startsWith(".")) continue;
     const absolute = resolve(directory, entry.name);
-    if (entry.isSymbolicLink()) {
-      throw new PackageImportError("symlink_input", `Symlink inputs are not allowed: ${normalizeRelative(root, absolute)}`, {
-        path: normalizeRelative(root, absolute)
+    state.entries += 1;
+    if (state.entries > limits.maxPackageEntries) {
+      throw new PackageImportError("package_entry_limit", `Package has more than ${limits.maxPackageEntries} filesystem entries.`, {
+        actual: state.entries,
+        limit: limits.maxPackageEntries
       });
     }
-    const extension = extname(entry.name).toLowerCase();
-    if (entry.isDirectory()) {
-      await walk(root, absolute, files, limits);
-    } else if (entry.isFile() && MACRO_ENABLED_EXTENSIONS.has(extension)) {
-      throw new PackageImportError("docx_macro_enabled", `Macro-enabled Word input is not allowed: ${normalizeRelative(root, absolute)}`, {
-        path: normalizeRelative(root, absolute)
-      });
-    } else if (entry.isFile() && SUPPORTED_EXTENSIONS.has(extension)) {
-      files.push(absolute);
-      if (files.length > limits.maxPackageEntries) {
-        throw new PackageImportError("package_entry_limit", `Package has more than ${limits.maxPackageEntries} supported files.`, {
-          actual: files.length,
-          limit: limits.maxPackageEntries
+    const relativePath = normalizeRelative(root, absolute);
+    const current = await lstat(absolute);
+    if (current.isSymbolicLink()) {
+      throw new PackageImportError("symlink_input", `Symlink inputs are not allowed: ${relativePath}`, { path: relativePath });
+    }
+    if (current.isDirectory()) {
+      const childDepth = depth + 1;
+      if (childDepth > limits.maxPackageDepth) {
+        throw new PackageImportError("package_depth_limit", `Package directory depth exceeds ${limits.maxPackageDepth}.`, {
+          path: relativePath,
+          actual: childDepth,
+          limit: limits.maxPackageDepth
         });
       }
+      // Hidden entries consume the traversal budget, but hidden directories are not recursed into.
+      if (entry.name.startsWith(".")) continue;
+      const resolvedDirectory = await realpath(absolute);
+      if (resolvedDirectory !== root && !resolvedDirectory.startsWith(`${root}${sep}`)) {
+        throw new PackageImportError("unsafe_path", "Directory changed outside package during traversal.", { path: relativePath });
+      }
+      const checked = await lstat(absolute);
+      if (!checked.isDirectory() || checked.isSymbolicLink() || checked.dev !== current.dev || checked.ino !== current.ino) {
+        throw new PackageImportError("unsafe_path", "Directory changed during traversal.", { path: relativePath });
+      }
+      await walk(root, resolvedDirectory, files, limits, state, childDepth);
+      continue;
+    }
+    // Hidden entries consume the traversal budget, but hidden files are not inventoried.
+    if (entry.name.startsWith(".")) continue;
+    const extension = extname(entry.name).toLowerCase();
+    if (current.isFile() && MACRO_ENABLED_EXTENSIONS.has(extension)) {
+      throw new PackageImportError("docx_macro_enabled", `Macro-enabled Word input is not allowed: ${relativePath}`, {
+        path: relativePath
+      });
+    } else if (current.isFile() && SUPPORTED_EXTENSIONS.has(extension)) {
+      files.push(absolute);
     }
   }
 }
@@ -209,7 +243,8 @@ function decodeUtf8(bytes: Buffer, path: string): string {
   try {
     return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch (error) {
-    const cause = error instanceof Error ? error.message : String(error);
+    const value = error instanceof Error ? error.message : String(error);
+    const cause = value.replace(/[\r\n\t]+/g, " ").slice(0, 240);
     throw new PackageImportError("problem_encoding", `Problem statement is not valid UTF-8: ${path}`, { path, cause });
   }
 }
@@ -251,6 +286,7 @@ async function extractProblem(
 }
 
 export async function importPackage(packagePath: string, options: ImportOptions = {}): Promise<ImportedPackage> {
+  const limits = normalizedLimits(options.limits);
   const requestedRoot = resolve(packagePath);
   const requestedStat = await lstat(requestedRoot);
   if (requestedStat.isSymbolicLink()) {
@@ -258,9 +294,15 @@ export async function importPackage(packagePath: string, options: ImportOptions 
   }
   if (!requestedStat.isDirectory()) throw new Error(`Package path is not a directory: ${packagePath}`);
   const root = await realpath(requestedRoot);
-  const limits = normalizedLimits(options.limits);
+  const checkedRoot = await lstat(requestedRoot);
+  if (!checkedRoot.isDirectory()
+    || checkedRoot.isSymbolicLink()
+    || checkedRoot.dev !== requestedStat.dev
+    || checkedRoot.ino !== requestedStat.ino) {
+    throw new PackageImportError("unsafe_path", "Package root changed during import.", { path: packagePath });
+  }
   const files: string[] = [];
-  await walk(root, root, files, limits);
+  await walk(root, root, files, limits, { entries: 0 }, 0);
   const problemPath = selectProblem(root, files);
   const problemBeforeStat = await lstat(problemPath);
   if (!problemBeforeStat.isFile() || problemBeforeStat.isSymbolicLink()) {

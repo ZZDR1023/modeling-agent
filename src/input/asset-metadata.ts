@@ -16,6 +16,7 @@ import {
 } from "./xml.js";
 
 const OFFICE_DOCUMENT_RELATIONSHIPS_NAMESPACE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+const MAX_CAUSE_LENGTH = 240;
 const XLSX_ZIP_CODES = {
   corrupt: "metadata_unreadable",
   encrypted: "metadata_unreadable",
@@ -127,6 +128,74 @@ function workbookSheets(xml: Buffer, path: string, sheetLimit: number, byteLimit
   return sheets;
 }
 
+function decodePercentEscapes(value: string): string | undefined {
+  let decoded = value;
+  for (let depth = 0; depth < 4 && decoded.includes("%"); depth += 1) {
+    try {
+      const next = decodeURIComponent(decoded);
+      if (next === decoded) return undefined;
+      decoded = next;
+    } catch {
+      return undefined;
+    }
+  }
+  return decoded.includes("%") ? undefined : decoded;
+}
+
+function normalizedOoxmlEntryKey(name: string): string | undefined {
+  const isDirectory = name.endsWith("/");
+  const partName = isDirectory ? name.slice(0, -1) : name;
+  const decoded = decodePercentEscapes(partName);
+  if (decoded === undefined
+    || !decoded
+    || name.startsWith("/")
+    || partName.endsWith("/")
+    || decoded !== partName
+    || /[\u0000-\u001f\u007f]/.test(decoded)
+    || decoded.includes("\\")
+    || decoded.includes("?")
+    || decoded.includes("#")) return undefined;
+  const normalized = decoded.normalize("NFC");
+  if (normalized !== decoded || normalized.split("/").some((segment) => !segment || segment === "." || segment === "..")) return undefined;
+  return normalized.toLowerCase();
+}
+
+function validateOoxmlEntryNames(entryNames: Set<string>, path: string): void {
+  const keys = new Set<string>();
+  for (const name of entryNames) {
+    const key = normalizedOoxmlEntryKey(name);
+    if (key === undefined || keys.has(key)) {
+      throw new PackageImportError("metadata_unreadable", "XLSX contains unsafe or ambiguous package part names.", { path: name });
+    }
+    keys.add(key);
+  }
+}
+
+function worksheetTargetMode(value: string): string | undefined {
+  const decoded = decodePercentEscapes(value.trim());
+  return decoded?.trim().toLowerCase();
+}
+
+function worksheetTarget(target: string): string | undefined {
+  const decoded = decodePercentEscapes(target.trim());
+  if (decoded === undefined || !decoded
+    || decoded.includes("%")
+    || /[\u0000-\u001f\u007f]/.test(decoded)
+    || decoded.includes("\\")
+    || decoded.includes("?")
+    || decoded.includes("#")
+    || decoded.startsWith("/")
+    || decoded.startsWith("//")
+    || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(decoded)) return undefined;
+  const segments: string[] = [];
+  for (const segment of decoded.split("/")) {
+    if (!segment || segment === ".") return undefined;
+    if (segment === "..") return undefined;
+    segments.push(segment);
+  }
+  return `xl/${segments.join("/")}`;
+}
+
 function worksheetRelationships(xml: Buffer, path: string, byteLimit: number): Map<string, string> {
   if (xml.length > byteLimit) {
     throw new PackageImportError("metadata_limit", `XLSX relationships metadata exceeds ${byteLimit} bytes.`, {
@@ -139,17 +208,23 @@ function worksheetRelationships(xml: Buffer, path: string, byteLimit: number): M
   parseXml(xml, {
     openTag(tag) {
       if (tag.uri !== PACKAGE_RELATIONSHIPS_NAMESPACE || tag.local !== "Relationship") return;
-      const id = attributeValue(tag, "Id");
-      const target = attributeValue(tag, "Target");
-      const type = attributeValue(tag, "Type");
+      const id = attributeValue(tag, "Id")?.trim();
+      const target = attributeValue(tag, "Target")?.trim();
+      const type = attributeValue(tag, "Type")?.trim();
       if (!id || !target || !type?.endsWith("/worksheet")) return;
-      if (attributeValue(tag, "TargetMode")?.toLowerCase() === "external") {
+      const rawTargetMode = attributeValue(tag, "TargetMode");
+      const targetMode = rawTargetMode === undefined ? undefined : worksheetTargetMode(rawTargetMode);
+      if (rawTargetMode !== undefined && targetMode !== "internal") {
         throw new PackageImportError("metadata_unreadable", "External XLSX worksheet relationship is not followed.", { path });
       }
-      if (target.startsWith("/") || target.includes("\\") || target.split("/").includes("..")) {
-        throw new PackageImportError("metadata_unreadable", `Unsafe XLSX worksheet target: ${target}`, { path });
+      const resolvedTarget = worksheetTarget(target);
+      if (resolvedTarget === undefined) {
+        throw new PackageImportError("metadata_unreadable", "Unsafe XLSX worksheet target.", { path });
       }
-      relationships.set(id, `xl/${target}`);
+      if (relationships.has(id)) {
+        throw new PackageImportError("metadata_unreadable", "XLSX contains duplicate worksheet relationship IDs.", { path });
+      }
+      relationships.set(id, resolvedTarget);
     }
   });
   return relationships;
@@ -189,6 +264,7 @@ async function xlsxMetadata(path: string, sourceBytes: number, limits: ImportLim
       XLSX_ZIP_CODES,
       (name) => name === "xl/workbook.xml" || name === "xl/_rels/workbook.xml.rels" || name.startsWith("xl/worksheets/")
     );
+    validateOoxmlEntryNames(archive.entryNames, path);
     const workbook = archive.entries.get("xl/workbook.xml");
     const relationshipXml = archive.entries.get("xl/_rels/workbook.xml.rels");
     if (!workbook || !relationshipXml) throw new PackageImportError("metadata_unreadable", "XLSX is missing workbook metadata parts.", { path });
@@ -211,8 +287,9 @@ async function xlsxMetadata(path: string, sourceBytes: number, limits: ImportLim
     };
   } catch (error) {
     if (error instanceof PackageImportError) throw error;
-    const cause = error instanceof Error ? error.message : String(error);
-    throw new PackageImportError("metadata_unreadable", `Could not read XLSX metadata: ${cause}`, { path, cause });
+    const value = error instanceof Error ? error.message : String(error);
+    const cause = value.replace(/[\r\n\t]+/g, " ").slice(0, MAX_CAUSE_LENGTH);
+    throw new PackageImportError("metadata_unreadable", "Could not read XLSX metadata.", { path, cause });
   }
 }
 
