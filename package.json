@@ -9,7 +9,7 @@
     "node": ">=24 <25"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-schemas.mjs && node scripts/copy-build-assets.mjs",
     "check": "npm run typecheck && npm test && npm run check:python",
     "check:python": "python3 -m unittest discover -s python/tests -v && python3 -m py_compile python/modeling_agent/*.py python/tests/*.py",
     "cli": "tsx src/cli/main.ts",

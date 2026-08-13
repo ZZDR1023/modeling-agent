@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import type { ErrorObject, ValidateFunction } from "ajv";
@@ -22,6 +23,11 @@ const schemaFiles: Record<SchemaName, string> = {
   "evidence-graph": "evidence-graph.v1.json"
 };
 
+function defaultSchemaDirectory(): string {
+  // This resolves to schemas/ for tsx and dist/schemas/ after compilation.
+  return fileURLToPath(new URL("../../schemas/", import.meta.url));
+}
+
 export class ContractValidationError extends Error {
   readonly schemaName: SchemaName;
   readonly validationErrors: ErrorObject[];
@@ -43,7 +49,7 @@ export class SchemaRegistry {
   readonly #ajv: InstanceType<typeof Ajv2020>;
   readonly #validators = new Map<SchemaName, ValidateFunction>();
 
-  constructor(schemaDirectory = fileURLToPath(new URL("../../schemas/", import.meta.url))) {
+  constructor(schemaDirectory = defaultSchemaDirectory()) {
     this.#ajv = new Ajv2020({ allErrors: true, strict: true, allowUnionTypes: true });
     this.#ajv.addFormat("date-time", {
       type: "string",
@@ -51,7 +57,7 @@ export class SchemaRegistry {
     });
 
     for (const [name, filename] of Object.entries(schemaFiles) as Array<[SchemaName, string]>) {
-      const schema = JSON.parse(readFileSync(new URL(filename, `file://${schemaDirectory}/`), "utf8")) as object;
+      const schema = JSON.parse(readFileSync(resolve(schemaDirectory, filename), "utf8")) as object;
       this.#validators.set(name, this.#ajv.compile(schema));
     }
   }

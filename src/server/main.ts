@@ -2,17 +2,20 @@
 import { resolve } from "node:path";
 import { SchemaRegistry } from "../contracts/schema-registry.js";
 import { Orchestrator } from "../orchestrator/orchestrator.js";
+import { createRuntime } from "../runtime/factory.js";
 import { readServerConfig } from "./config.js";
 import { buildServer } from "./index.js";
 
 async function main(): Promise<void> {
   const config = readServerConfig();
+  const schemas = new SchemaRegistry();
   const server = buildServer({
     host: config.host,
     logger: true,
     orchestrator: new Orchestrator({
       runsRoot: resolve(config.runsRoot),
-      schemas: new SchemaRegistry(resolve(process.cwd(), "schemas"))
+      schemas,
+      runtimeFactory: (options) => createRuntime(options, schemas)
     })
   });
   let closing: Promise<void> | undefined;
